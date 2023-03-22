@@ -30,33 +30,36 @@ class ContinuousEdgeLineDatasetMask(Dataset):
         self.image_id_list = []
         with open(self.pt_dataset) as f:
             for line in f:
-                self.image_id_list.append(line.strip())
+                self.image_id_list.append(line.strip())  # 從指定的training image txt讀入所有要訓練的image的路徑，此list裡面每一個element就是一張RGB圖片
 
         if is_train:
+            # training mask TYPE1: irregular mask
             self.irregular_mask_list = []
             with open(mask_path[0]) as f:
                 for line in f:
                     self.irregular_mask_list.append(line.strip())
             self.irregular_mask_list = sorted(self.irregular_mask_list, key=lambda x: x.split('/')[-1])
+            # training mask TYPE2: segmentation mask
             self.segment_mask_list = []
             with open(mask_path[1]) as f:
                 for line in f:
                     self.segment_mask_list.append(line.strip())
             self.segment_mask_list = sorted(self.segment_mask_list, key=lambda x: x.split('/')[-1])
         else:
-            self.mask_list = glob(test_mask_path + '/*')
+            self.mask_list = glob(test_mask_path + '/*')  # 在測試時，mask的路徑預設為一個資料夾，因此在建立mask list時要將參數給定的mask路徑下所有個圖片都讀入，glob為取得所有的檔案的路徑
             self.mask_list = sorted(self.mask_list, key=lambda x: x.split('/')[-1])
+            print(f"self.mask_list: {self.mask_list}")  # test
 
-        self.image_size = image_size
-        self.training = is_train
-        self.mask_rates = mask_rates
-        self.line_path = line_path
+        self.image_size = image_size  # 設定圖片大小：預設訓練的圖片大小為固定
+        self.training = is_train  # 是否為訓練模式
+        self.mask_rates = mask_rates  # 設定mask的比例, 'irregular rate, coco rate, addition rate': 0.4, 0.8, 1.0
+        self.line_path = line_path  # 設定預先使用wireframe偵測儲存下來的圖片
         self.wireframe_th = 0.85
 
     def __len__(self):
-        return len(self.image_id_list)
+        return len(self.image_id_list)  # 有多少張訓練圖片
 
-    def resize(self, img, height, width, center_crop=False):
+    def resize(self, img, height, width, center_crop=False):  # resize成正方形
         imgh, imgw = img.shape[0:2]
 
         if center_crop and imgh != imgw:
@@ -78,7 +81,7 @@ class ContinuousEdgeLineDatasetMask(Dataset):
 
         # test mode: load mask non random
         if self.training is False:
-            mask = cv2.imread(self.mask_list[index], cv2.IMREAD_GRAYSCALE)
+            mask = cv2.imread(self.mask_list[index], cv2.IMREAD_GRAYSCALE)  # 以灰階的模式取得mask的路徑
             mask = cv2.resize(mask, (imgw, imgh), interpolation=cv2.INTER_NEAREST)
             mask = (mask > 127).astype(np.uint8) * 255
             return mask
@@ -99,7 +102,7 @@ class ContinuousEdgeLineDatasetMask(Dataset):
                                    cv2.IMREAD_GRAYSCALE).astype(np.float)
                 mask2 = cv2.imread(self.irregular_mask_list[mask_index2],
                                    cv2.IMREAD_GRAYSCALE).astype(np.float)
-                mask = np.clip(mask1 + mask2, 0, 255).astype(np.uint8)
+                mask = np.clip(mask1 + mask2, 0, 255).astype(np.uint8)  # 混合irregular mask和segmentation mask兩種
 
             if mask.shape[0] != imgh or mask.shape[1] != imgw:
                 mask = cv2.resize(mask, (imgw, imgh), interpolation=cv2.INTER_NEAREST)
@@ -118,11 +121,11 @@ class ContinuousEdgeLineDatasetMask(Dataset):
 
     def load_wireframe(self, idx, size):
         selected_img_name = self.image_id_list[idx]
-        line_name = self.line_path + '/' + os.path.basename(selected_img_name).replace('.png', '.pkl').replace('.jpg', '.pkl')
-        wf = pickle.load(open(line_name, 'rb'))
+        line_name = self.line_path + '/' + os.path.basename(selected_img_name).replace('.png', '.pkl').replace('.jpg', '.pkl')  # 從訓練的index知道目前的訓練image的名稱是什麼，而wireframe的檔名會與image相同但副檔名不同
+        wf = pickle.load(open(line_name, 'rb'))  # 讀入對應的wireframe檔
         lmap = np.zeros((size, size))
-        for i in range(len(wf['scores'])):
-            if wf['scores'][i] > self.wireframe_th:
+        for i in range(len(wf['scores'])):  # 所有偵測到的線條
+            if wf['scores'][i] > self.wireframe_th:  # 依序檢查，有超過threshold的線條才會拿來使用
                 line = wf['lines'][i].copy()
                 line[0] = line[0] * size
                 line[1] = line[1] * size
@@ -133,15 +136,15 @@ class ContinuousEdgeLineDatasetMask(Dataset):
         return lmap
 
     def __getitem__(self, idx):
-        selected_img_name = self.image_id_list[idx]
-        img = cv2.imread(selected_img_name)
+        selected_img_name = self.image_id_list[idx]  # 目前訓練的image case名字
+        img = cv2.imread(selected_img_name)  # 讀取此image的rgb版本
         while img is None:
             print('Bad image {}...'.format(selected_img_name))
             idx = random.randint(0, len(self.image_id_list) - 1)
             img = cv2.imread(self.image_id_list[idx])
-        img = img[:, :, ::-1]
+        img = img[:, :, ::-1]  # RGB轉成BGR
 
-        img = self.resize(img, self.image_size, self.image_size, center_crop=False)
+        img = self.resize(img, self.image_size, self.image_size, center_crop=False)  # 切割成正方形
         img_gray = rgb2gray(img)
         edge = self.load_edge(img_gray)
         line = self.load_wireframe(idx, self.image_size)

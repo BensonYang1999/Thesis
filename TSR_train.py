@@ -75,7 +75,7 @@ if __name__ == '__main__':
     parser.add_argument('--ckpt_path', type=str, default='./ckpt')
     parser.add_argument('--data_path', type=str, default=None, help='Indicate where is the training set')
     parser.add_argument('--train_line_path', type=str, default=None, help='Indicate where is the wireframes of training set')
-    parser.add_argument('--mask_path', type=list, default=['irregular_mask_list.txt', 'coco_mask_list.txt'])
+    parser.add_argument('--mask_path', type=list, default=['data_list/irregular_mask_list.txt', 'data_list/coco_mask_list.txt'])
     parser.add_argument('--mask_rates', type=list, default=[0.4, 0.8, 1.0],
                         help='irregular rate, coco rate, addition rate')
     parser.add_argument('--batch_size', type=int, default=32)

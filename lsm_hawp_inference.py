@@ -18,6 +18,7 @@ if __name__ == '__main__':
     os.makedirs(args.output_path, exist_ok=True)
 
     model = LSM_HAWP(threshold=0.8, size=512)
+    # model = LSM_HAWP(threshold=0.8, size=1024)
     model.lsm_hawp.load_state_dict(torch.load(args.ckpt_path)['model'])
     img_paths = glob(args.input_path + '/*')
     model.wireframe_detect(img_paths, args.output_path)
