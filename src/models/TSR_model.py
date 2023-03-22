@@ -18,6 +18,7 @@ class EdgeLineGPTConfig:
     def __init__(self, **kwargs):
         for k, v in kwargs.items():
             setattr(self, k, v)
+            # embd_pdrop=0.0, resid_pdrop=0.0, n_embd=opts.n_embd, block_size=32, attn_pdrop=0.0, n_layer=opts.n_layer, n_head=opts.n_head
 
 
 class EdgeLineGPT256RelBCE(nn.Module):
@@ -26,17 +27,17 @@ class EdgeLineGPT256RelBCE(nn.Module):
     def __init__(self, config):
         super().__init__()
 
-        self.pad1 = nn.ReflectionPad2d(3)
-        self.conv1 = nn.Conv2d(in_channels=6, out_channels=64, kernel_size=7, padding=0)
+        self.pad1 = nn.ReflectionPad2d(3) # square -> bigger square (extend 3 for each side)
+        self.conv1 = nn.Conv2d(in_channels=6, out_channels=64, kernel_size=7, padding=0) # downsample input
         self.act = nn.ReLU(True)
 
-        self.conv2 = nn.Conv2d(in_channels=64, out_channels=128, kernel_size=4, stride=2, padding=1)
+        self.conv2 = nn.Conv2d(in_channels=64, out_channels=128, kernel_size=4, stride=2, padding=1)  # downsample 1
 
-        self.conv3 = nn.Conv2d(in_channels=128, out_channels=256, kernel_size=4, stride=2, padding=1)
+        self.conv3 = nn.Conv2d(in_channels=128, out_channels=256, kernel_size=4, stride=2, padding=1) # downsample 2
 
-        self.conv4 = nn.Conv2d(in_channels=256, out_channels=256, kernel_size=4, stride=2, padding=1)
+        self.conv4 = nn.Conv2d(in_channels=256, out_channels=256, kernel_size=4, stride=2, padding=1) # downsample 3
 
-        self.pos_emb = nn.Parameter(torch.zeros(1, 1024, 256))
+        self.pos_emb = nn.Parameter(torch.zeros(1, 1024, 256))  # special tensor that automatically add into parameter list
         self.drop = nn.Dropout(config.embd_pdrop)
         # transformer, input: 32*32*config.n_embd
         self.blocks = []
@@ -47,21 +48,21 @@ class EdgeLineGPT256RelBCE(nn.Module):
         # decoder, input: 32*32*config.n_embd
         self.ln_f = nn.LayerNorm(256)
 
-        self.convt1 = nn.ConvTranspose2d(256, 256, kernel_size=4, stride=2, padding=1)
+        self.convt1 = nn.ConvTranspose2d(256, 256, kernel_size=4, stride=2, padding=1) # upsample 1
 
-        self.convt2 = nn.ConvTranspose2d(256, 128, kernel_size=4, stride=2, padding=1)
+        self.convt2 = nn.ConvTranspose2d(256, 128, kernel_size=4, stride=2, padding=1) # upsample 2
 
-        self.convt3 = nn.ConvTranspose2d(128, 64, kernel_size=4, stride=2, padding=1)
+        self.convt3 = nn.ConvTranspose2d(128, 64, kernel_size=4, stride=2, padding=1) # upsample 3
 
         self.padt = nn.ReflectionPad2d(3)
-        self.convt4 = nn.Conv2d(in_channels=64, out_channels=2, kernel_size=7, padding=0)
+        self.convt4 = nn.Conv2d(in_channels=64, out_channels=2, kernel_size=7, padding=0) # upsample and ouput only edge/line
 
         self.act_last = nn.Sigmoid()
 
-        self.block_size = 32
+        self.block_size = 32  # transformer input size
         self.config = config
 
-        self.apply(self._init_weights)
+        self.apply(self._init_weights)  # initialize the weights (multiple layer initialization)
 
         logger.info("number of parameters: %e", sum(p.numel() for p in self.parameters()))
 
@@ -69,19 +70,19 @@ class EdgeLineGPT256RelBCE(nn.Module):
         return self.block_size
 
     def _init_weights(self, module):
-        if isinstance(module, (nn.Linear, nn.Embedding, nn.Conv2d, nn.ConvTranspose2d)):
+        if isinstance(module, (nn.Linear, nn.Embedding, nn.Conv2d, nn.ConvTranspose2d)):  # if one of the type
             module.weight.data.normal_(mean=0.0, std=0.02)
             if isinstance(module, nn.Linear) and module.bias is not None:
                 module.bias.data.zero_()
         elif isinstance(module, nn.LayerNorm):
-            module.bias.data.zero_()
+            module.bias.data.zero_()  
             module.weight.data.fill_(1.0)
 
-    def configure_optimizers(self, train_config):
+    def configure_optimizers(self, train_config):  # some parameter need weight decay to avoid overfitting
         # separate out all parameters to those that will and won't experience regularizing weight decay
         decay = set()
         no_decay = set()
-        whitelist_weight_modules = (torch.nn.Linear, torch.nn.Conv2d, torch.nn.ConvTranspose2d)
+        whitelist_weight_modules = (torch.nn.Linear, torch.nn.Conv2d, torch.nn.ConvTranspose2d) # need weight decay
         blacklist_weight_modules = (torch.nn.LayerNorm, torch.nn.Embedding)
         for mn, m in self.named_modules():
             for pn, p in m.named_parameters():
@@ -115,47 +116,49 @@ class EdgeLineGPT256RelBCE(nn.Module):
         return optimizer
 
     def forward(self, img_idx, edge_idx, line_idx, edge_targets=None, line_targets=None, masks=None):
-        img_idx = img_idx * (1 - masks)
-        edge_idx = edge_idx * (1 - masks)
-        line_idx = line_idx * (1 - masks)
-        x = torch.cat((img_idx, edge_idx, line_idx, masks), dim=1)
-        x = self.pad1(x)
-        x = self.conv1(x)
+        img_idx = img_idx * (1 - masks)  # create masked image
+        edge_idx = edge_idx * (1 - masks) # create masked edge
+        line_idx = line_idx * (1 - masks) # create masked line
+        x = torch.cat((img_idx, edge_idx, line_idx, masks), dim=1)  # concat method NEED checking (maybe is channel-wise)
+        x = self.pad1(x)  # reflection padding
+        x = self.conv1(x)  # downsample input layer
+        x = self.act(x)  # activate with ReLU
+
+        x = self.conv2(x)  # downsample 1 
         x = self.act(x)
 
-        x = self.conv2(x)
+        x = self.conv3(x)  # downsample 2 
         x = self.act(x)
 
-        x = self.conv3(x)
+        x = self.conv4(x)  # downsample 3 
         x = self.act(x)
 
-        x = self.conv4(x)
-        x = self.act(x)
-
-        [b, c, h, w] = x.shape
-        x = x.view(b, c, h * w).transpose(1, 2).contiguous()
+        [b, c, h, w] = x.shape  # before here, the image data is stil with Height x Width
+        x = x.view(b, c, h * w).transpose(1, 2).contiguous() # image 2D -> 1D (flatten) and change image and color channel
+        # make the data into shape like -> [batch size, image(1D), channels(RGB, edge, line, mask)]
 
         position_embeddings = self.pos_emb[:, :h * w, :]  # each position maps to a (learnable) vector
-        x = self.drop(x + position_embeddings)  # [b,hw,c]
-        x = x.permute(0, 2, 1).reshape(b, c, h, w)
+        x = self.drop(x + position_embeddings)  # [b,hw,c]  # add positional embeddings, but dropping to make some position missing pos-emb
+        x = x.permute(0, 2, 1).reshape(b, c, h, w)  # swap the image and channel back to [b, c, h*w] then reshape to [b,c,h,w]
 
+        # Transformer Input: [b,c,h,w]
         x = self.blocks(x)
-        x = x.permute(0, 2, 3, 1)
-        x = self.ln_f(x).permute(0, 3, 1, 2).contiguous()
+        x = x.permute(0, 2, 3, 1)  # swap to [b, h, w, c]
+        x = self.ln_f(x).permute(0, 3, 1, 2).contiguous()  # layer norm then swap back (以batch中的instance為單位normalize)
 
-        x = self.convt1(x)
+        x = self.convt1(x) # upsample 1
         x = self.act(x)
 
-        x = self.convt2(x)
+        x = self.convt2(x) # upsample 2
         x = self.act(x)
 
-        x = self.convt3(x)
+        x = self.convt3(x) # upsample 3
         x = self.act(x)
 
-        x = self.padt(x)
-        x = self.convt4(x)
+        x = self.padt(x)  # padding back
+        x = self.convt4(x)  # upsample output as the original image shape
 
-        edge, line = torch.split(x, [1, 1], dim=1)
+        edge, line = torch.split(x, [1, 1], dim=1)  # seperate the TSR outputs
 
         if edge_targets is not None and line_targets is not None:
             loss = F.binary_cross_entropy_with_logits(edge.permute(0, 2, 3, 1).contiguous().view(-1, 1),
@@ -164,14 +167,14 @@ class EdgeLineGPT256RelBCE(nn.Module):
             loss = loss + F.binary_cross_entropy_with_logits(line.permute(0, 2, 3, 1).contiguous().view(-1, 1),
                                                              line_targets.permute(0, 2, 3, 1).contiguous().view(-1, 1),
                                                              reduction='none')
-            masks_ = masks.view(-1, 1)
+            masks_ = masks.view(-1, 1)  # only compute the loss in the masked region
 
             loss *= masks_
             loss = torch.mean(loss)
         else:
             loss = 0
-        edge, line = self.act_last(edge), self.act_last(line)
-        return edge, line, loss
+        edge, line = self.act_last(edge), self.act_last(line)  # sigmoid activate
+        return edge, line, loss  # edge/line is in shape [b, c, h, w]
 
     def forward_with_logits(self, img_idx, edge_idx, line_idx, masks=None):
         img_idx = img_idx * (1 - masks)
