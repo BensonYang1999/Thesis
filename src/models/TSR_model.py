@@ -176,7 +176,7 @@ class EdgeLineGPT256RelBCE(nn.Module):
         edge, line = self.act_last(edge), self.act_last(line)  # sigmoid activate
         return edge, line, loss  # edge/line is in shape [b, c, h, w]
 
-    def forward_with_logits(self, img_idx, edge_idx, line_idx, masks=None):
+    def forward_with_logits(self, img_idx, edge_idx, line_idx, masks=None):  # for inference, no loss computing
         img_idx = img_idx * (1 - masks)
         edge_idx = edge_idx * (1 - masks)
         line_idx = line_idx * (1 - masks)
