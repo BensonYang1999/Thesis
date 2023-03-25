@@ -236,7 +236,7 @@ class EdgeLineGPT256RelBCE(nn.Module):
 class EdgeLineGPT256RelBCE_video(nn.Module):
     """  the full GPT language model, with a context size of block_size """
 
-    def __init__(self, config):
+    def __init__(self, config, device):
         super().__init__()
 
         self.pad1 = nn.ReflectionPad2d(3) # square -> bigger square (extend 3 for each side)
@@ -267,7 +267,7 @@ class EdgeLineGPT256RelBCE_video(nn.Module):
         self.act_last = nn.Sigmoid()
 
         self.fuseformerBlock = InpaintGenerator()
-        # self.fuseformerBlock = self.fuseformerBlock.to("cuda")
+        self.fuseformerBlock = self.fuseformerBlock.to(device)
 
         self.config = config
 
