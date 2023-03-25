@@ -347,7 +347,7 @@ class EdgeLineGPT256RelBCE_video(nn.Module):
         x = x.permute(0, 2, 1).reshape(t, c, h, w)  # swap the image and channel back to [b, c, h*w] then reshape to [b,c,h,w]
 
         # Transformer blocks
-        # TODO: input [50, 256, 32, 32]
+        # input [50, 256, 32, 32]
         # print(f"shape before FuseFormer: {x.shape}")
         x = self.fuseformerBlock(x)
         # print(f"shape after FuseFormer: {tmp.shape}")
@@ -388,6 +388,61 @@ class EdgeLineGPT256RelBCE_video(nn.Module):
         edge, line = self.act_last(edge), self.act_last(line)  # sigmoid activate
 
         return edge, line, loss
+    
+    def forward_with_logits(self, img_idx, edge_idx, line_idx, masks=None):
+        img_idx = img_idx * (1 - masks)  # create masked image
+        edge_idx = edge_idx * (1 - masks) # create masked edge
+        line_idx = line_idx * (1 - masks) # create masked line
+        img_idx, edge_idx, line_idx, masks = img_idx.squeeze(dim=0), edge_idx.squeeze(dim=0), line_idx.squeeze(dim=0), masks.squeeze(dim=0)  # 把batch的維度拿掉(video每次只處理1個)
+        edge_targets, line_targets = edge_targets.squeeze(dim=0), line_targets.squeeze(dim=0)
+
+        x = torch.cat((img_idx, edge_idx, line_idx, masks), dim=1)  # concat method NEED checking (maybe is channel-wise)
+
+        # Encoder: downsample
+        x = self.pad1(x)  # reflection padding
+        x = self.conv1(x)  # downsample input layer
+        x = self.act(x)  # activate with ReLU
+
+        x = self.conv2(x)  # downsample 1 
+        x = self.act(x)
+
+        x = self.conv3(x)  # downsample 2 
+        x = self.act(x)
+
+        x = self.conv4(x)  # downsample 3 
+        x = self.act(x)
+
+        [t, c, h, w] = x.shape  # before here, the video data is still with Height x Width -> [50, 256, 32, 32] -> [t, c, h, w]
+        x = x.view(t, c, h * w).transpose(1, 2).contiguous() # image 2D -> 1D (flatten) and change image and color channel
+        # make the data into shape like -> [batch size, image(1D), channels(RGB, edge, line, mask)]
+
+        position_embeddings = self.pos_emb[:, :h * w, :]  # each position maps to a (learnable) vector
+        x = self.drop(x + position_embeddings)  # [b,hw,c]  # add positional embeddings, but dropping to make some position missing pos-emb
+        x = x.permute(0, 2, 1).reshape(t, c, h, w)  # swap the image and channel back to [b, c, h*w] then reshape to [b,c,h,w]
+
+        # Transformer blocks
+        # input [50, 256, 32, 32]
+        # print(f"shape before FuseFormer: {x.shape}")
+        x = self.fuseformerBlock(x)
+        # print(f"shape after FuseFormer: {tmp.shape}")
+
+        # print(f"x shape: {x.shape}")
+        # Decoder: upsample
+        x = self.convt1(x) # upsample 1
+        x = self.act(x)
+
+        x = self.convt2(x) # upsample 2
+        x = self.act(x)
+
+        x = self.convt3(x) # upsample 3
+        x = self.act(x)
+
+        x = self.padt(x)  # padding back
+        x = self.convt4(x)  # upsample output as the original image shape
+        
+        edge, line = torch.split(x, [1, 1], dim=1)  # seperate the TSR outputs
+
+        return edge, line
 
 if __name__=="__main__":
     data_path = "./data_list/davis_train_list.txt"
