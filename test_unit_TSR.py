@@ -19,6 +19,18 @@ from torch.utils.data.dataloader import DataLoader
 import torch.nn as nn
 from src.models.TSR_model import EdgeLineGPT256RelBCE, EdgeLineGPTConfig
 
+"""
+FuseFormer imports
+"""
+import numpy as np
+import time
+import math
+from functools import reduce
+import torchvision.models as models
+from torch.nn import functional as nnF
+
+from src.models.fuseformer import InpaintGenerator
+
 sys.path.append('..')
 
 logger = logging.getLogger(__name__)
@@ -245,6 +257,9 @@ class EdgeLineGPT256RelBCE_video(nn.Module):
 
         self.act_last = nn.Sigmoid()
 
+        self.fuseformerBlock = InpaintGenerator()
+        # self.fuseformerBlock = self.fuseformerBlock.to("cuda")
+
         self.config = config
 
         self.apply(self._init_weights)  # initialize the weights (multiple layer initialization)
@@ -305,6 +320,7 @@ class EdgeLineGPT256RelBCE_video(nn.Module):
         edge_idx = edge_idx * (1 - masks) # create masked edge
         line_idx = line_idx * (1 - masks) # create masked line
         img_idx, edge_idx, line_idx, masks = img_idx.squeeze(dim=0), edge_idx.squeeze(dim=0), line_idx.squeeze(dim=0), masks.squeeze(dim=0)  # 把batch的維度拿掉(video每次只處理1個)
+        edge_targets, line_targets = edge_targets.squeeze(dim=0), line_targets.squeeze(dim=0)
 
         x = torch.cat((img_idx, edge_idx, line_idx, masks), dim=1)  # concat method NEED checking (maybe is channel-wise)
 
@@ -331,8 +347,12 @@ class EdgeLineGPT256RelBCE_video(nn.Module):
         x = x.permute(0, 2, 1).reshape(t, c, h, w)  # swap the image and channel back to [b, c, h*w] then reshape to [b,c,h,w]
 
         # Transformer blocks
-        # TODO
+        # TODO: input [50, 256, 32, 32]
+        # print(f"shape before FuseFormer: {x.shape}")
+        x = self.fuseformerBlock(x)
+        # print(f"shape after FuseFormer: {tmp.shape}")
 
+        # print(f"x shape: {x.shape}")
         # Decoder: upsample
         x = self.convt1(x) # upsample 1
         x = self.act(x)
@@ -349,7 +369,23 @@ class EdgeLineGPT256RelBCE_video(nn.Module):
         edge, line = torch.split(x, [1, 1], dim=1)  # seperate the TSR outputs
 
         # Loss computing
-        # TODO
+        if edge_targets is not None and line_targets is not None:
+            print(f"edge shape: {edge.shape}")  # test
+            print(f"edge_targets shape: {edge_targets.shape}")  # test
+            loss = nnF.binary_cross_entropy_with_logits(edge.permute(0, 2, 3, 1).contiguous().view(-1, 1),
+                                                      edge_targets.permute(0, 2, 3, 1).contiguous().view(-1, 1),
+                                                      reduction='none')
+            loss = loss + nnF.binary_cross_entropy_with_logits(line.permute(0, 2, 3, 1).contiguous().view(-1, 1),
+                                                             line_targets.permute(0, 2, 3, 1).contiguous().view(-1, 1),
+                                                             reduction='none')
+            masks_ = masks.view(-1, 1)  # only compute the loss in the masked region
+
+            loss *= masks_
+            loss = torch.mean(loss)
+        else:
+            loss = 0
+
+        edge, line = self.act_last(edge), self.act_last(line)  # sigmoid activate
 
         return edge, line, loss
 
@@ -385,6 +421,9 @@ if __name__=="__main__":
         edge, line, loss = IGPT_model(items['frames'], items['edges'], items['lines'], items['edges'], items['lines'],
                                          items['masks'])
         print(f"i: {i}")
+        print(f"edge shape: {edge.shape}")
+        print(f"line shape: {line.shape}")
+        print(f"loss= {loss}")
         if i == 5: break
 
 
