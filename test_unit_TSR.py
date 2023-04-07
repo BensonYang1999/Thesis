@@ -18,6 +18,13 @@ from torch.utils.data.dataloader import DataLoader
 
 import torch.nn as nn
 from src.models.TSR_model import EdgeLineGPT256RelBCE, EdgeLineGPTConfig
+import torchvision.transforms as T
+
+from src.Fuseformer.utils import Stack, ToTorchFormatTensor, GroupRandomHorizontalFlip
+
+import gc
+gc.collect()
+torch.cuda.empty_cache()
 
 """
 FuseFormer imports
@@ -172,6 +179,27 @@ class ContinuousEdgeLineDatasetMask_video(Dataset):
                 lmap[rr, cc] = np.maximum(lmap[rr, cc], value)
         return lmap
 
+    def load_item(self, index):  # from Fuseformer
+        video_name = self.video_names[index]
+        all_frames = [os.path.join(video_name, name) for name in sorted(os.listdir(video_name))]
+        all_masks = create_random_shape_with_random_motion(
+            len(all_frames), imageHeight=self.h, imageWidth=self.w)
+        ref_index = get_ref_index(len(all_frames), self.sample_length)
+        # read video frames
+        frames = []
+        masks = []
+        for idx in ref_index:
+            img = Image.open(all_frames[idx]).convert('RGB')
+            img = img.resize(self.size)
+            frames.append(img)
+            masks.append(all_masks[idx])
+        if self.split == 'train':
+            frames = GroupRandomHorizontalFlip()(frames)
+        # To tensors
+        frame_tensors = self._to_tensors(frames)*2.0 - 1.0
+        mask_tensors = self._to_tensors(masks)
+        return frame_tensors, mask_tensors
+
     def __getitem__(self, idx):
         # selected_img_name = self.image_id_list[idx]  # 目前訓練的image case名字
         video_name, frame_no = self.video_id_list[idx][0].split("/")[-2:]
@@ -227,7 +255,7 @@ class ContinuousEdgeLineDatasetMask_video(Dataset):
 class EdgeLineGPT256RelBCE_video(nn.Module):
     """  the full GPT language model, with a context size of block_size """
 
-    def __init__(self, config):
+    def __init__(self, config, device):
         super().__init__()
 
         self.pad1 = nn.ReflectionPad2d(3) # square -> bigger square (extend 3 for each side)
@@ -257,12 +285,26 @@ class EdgeLineGPT256RelBCE_video(nn.Module):
 
         self.act_last = nn.Sigmoid()
 
+        # Feature Fusion (6 channels to 3 channels)
+        self.fuse_channel = nn.Sequential(
+            nn.Conv2d(6, 32, kernel_size=3, padding='same'),
+            nn.LeakyReLU(0.2, inplace=True),
+            nn.Conv2d(32, 64, kernel_size=3, padding='same'),
+            nn.LeakyReLU(0.2, inplace=True),
+            nn.Conv2d(64, 16, kernel_size=3, padding='same'),
+            nn.LeakyReLU(0.2, inplace=True),
+            nn.Conv2d(16, 3, kernel_size=3, padding='same'),
+        )
+
         self.fuseformerBlock = InpaintGenerator()
-        # self.fuseformerBlock = self.fuseformerBlock.to("cuda")
+        self.fuseformerBlock = self.fuseformerBlock.to(device)
 
         self.config = config
 
         self.apply(self._init_weights)  # initialize the weights (multiple layer initialization)
+
+        self.resize_tensor = T.Resize(size = (240, 432))
+        # self.resize_tensor = T.Resize(size = (64, 64))
 
         logger.info("number of parameters: %e", sum(p.numel() for p in self.parameters()))
 
@@ -321,50 +363,64 @@ class EdgeLineGPT256RelBCE_video(nn.Module):
         line_idx = line_idx * (1 - masks) # create masked line
         img_idx, edge_idx, line_idx, masks = img_idx.squeeze(dim=0), edge_idx.squeeze(dim=0), line_idx.squeeze(dim=0), masks.squeeze(dim=0)  # 把batch的維度拿掉(video每次只處理1個)
         edge_targets, line_targets = edge_targets.squeeze(dim=0), line_targets.squeeze(dim=0)
+        
+        img_idx = self.resize_tensor(img_idx)
+        edge_idx = self.resize_tensor(edge_idx)
+        line_idx = self.resize_tensor(line_idx)
+        masks = self.resize_tensor(masks)
+        edge_targets = self.resize_tensor(edge_targets)
+        line_targets = self.resize_tensor(line_targets)
 
         x = torch.cat((img_idx, edge_idx, line_idx, masks), dim=1)  # concat method NEED checking (maybe is channel-wise)
+        x = torch.cat((img_idx, edge_idx, line_idx, masks), dim=1)  # concat method NEED checking (maybe is channel-wise)
+        # x = self.resize_tensor(x)
 
         # Encoder: downsample
-        x = self.pad1(x)  # reflection padding
-        x = self.conv1(x)  # downsample input layer
-        x = self.act(x)  # activate with ReLU
+        # x = self.pad1(x)  # reflection padding
+        # x = self.conv1(x)  # downsample input layer
+        # x = self.act(x)  # activate with ReLU
 
-        x = self.conv2(x)  # downsample 1 
-        x = self.act(x)
+        # x = self.conv2(x)  # downsample 1 
+        # x = self.act(x)
 
-        x = self.conv3(x)  # downsample 2 
-        x = self.act(x)
+        # x = self.conv3(x)  # downsample 2 
+        # x = self.act(x)
 
-        x = self.conv4(x)  # downsample 3 
-        x = self.act(x)
+        # x = self.conv4(x)  # downsample 3 
+        # x = self.act(x)
 
         [t, c, h, w] = x.shape  # before here, the video data is still with Height x Width -> [50, 256, 32, 32] -> [t, c, h, w]
-        x = x.view(t, c, h * w).transpose(1, 2).contiguous() # image 2D -> 1D (flatten) and change image and color channel
+        print(f"shape after concat: {x.shape}")  # test
+        # x = x.view(t, c, h * w).transpose(1, 2).contiguous() # image 2D -> 1D (flatten) and change image and color channel
         # make the data into shape like -> [batch size, image(1D), channels(RGB, edge, line, mask)]
 
-        position_embeddings = self.pos_emb[:, :h * w, :]  # each position maps to a (learnable) vector
-        x = self.drop(x + position_embeddings)  # [b,hw,c]  # add positional embeddings, but dropping to make some position missing pos-emb
-        x = x.permute(0, 2, 1).reshape(t, c, h, w)  # swap the image and channel back to [b, c, h*w] then reshape to [b,c,h,w]
+        # position_embeddings = self.pos_emb[:, :h * w, :]  # each position maps to a (learnable) vector
+        # x = self.drop(x + position_embeddings)  # [b,hw,c]  # add positional embeddings, but dropping to make some position missing pos-emb
+        # x = x.permute(0, 2, 1).reshape(t, c, h, w)  # swap the image and channel back to [b, c, h*w] then reshape to [b,c,h,w]
+
+        # Feature Fusion (6 channels to 3 channels)
+        # x = self.fuse_channel(x)
 
         # Transformer blocks
-        # input [50, 256, 32, 32]
-        # print(f"shape before FuseFormer: {x.shape}")
+        # input [50, 256, 32, 32] -> original ZITS
+        # input [1, 5, 3, 240, 432] -> original fuseformer
+        print(f"shape before FuseFormer: {x.shape}")  # test
         x = self.fuseformerBlock(x)
-        # print(f"shape after FuseFormer: {tmp.shape}")
+        print(f"shape after FuseFormer: {x.shape}")  # test
 
-        # print(f"x shape: {x.shape}")
+        print(f"x shape before upsample: {x.shape}")
         # Decoder: upsample
-        x = self.convt1(x) # upsample 1
-        x = self.act(x)
+        # x = self.convt1(x) # upsample 1
+        # x = self.act(x)
 
-        x = self.convt2(x) # upsample 2
-        x = self.act(x)
+        # x = self.convt2(x) # upsample 2
+        # x = self.act(x)
 
-        x = self.convt3(x) # upsample 3
-        x = self.act(x)
+        # x = self.convt3(x) # upsample 3
+        # x = self.act(x)
 
-        x = self.padt(x)  # padding back
-        x = self.convt4(x)  # upsample output as the original image shape
+        # x = self.padt(x)  # padding back
+        # x = self.convt4(x)  # upsample output as the original image shape
         
         edge, line = torch.split(x, [1, 1], dim=1)  # seperate the TSR outputs
 
@@ -450,6 +506,7 @@ if __name__=="__main__":
     mask_rates = [1.0, 0., 0.]
     image_size = 256
     line_path = "./datasets/DAVIS/JPEGImages/Full-Resolution_wireframes_pkl"
+    stride = 5
     train_dataset = ContinuousEdgeLineDatasetMask_video(data_path, mask_path=mask_path, is_train=True,
                                                       mask_rates=mask_rates, frame_size=image_size,
                                                       line_path=line_path)
@@ -463,7 +520,9 @@ if __name__=="__main__":
 
     model_config = EdgeLineGPTConfig(embd_pdrop=0.0, resid_pdrop=0.0, n_embd=256, block_size=32,
                                      attn_pdrop=0.0, n_layer=16, n_head=8)
-    IGPT_model = EdgeLineGPT256RelBCE_video(model_config)
+    IGPT_model = EdgeLineGPT256RelBCE_video(model_config, "cuda")
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    IGPT_model.to(device)
     IGPT_model.train()
 
     # items = next(iter(train_loader))
@@ -473,12 +532,37 @@ if __name__=="__main__":
         # print(f"type mask: {(mask.shape)}")
         # print(f"type edge: {(edge.shape)}")
         # print(f"type line: {(line.shape)}")
-        edge, line, loss = IGPT_model(items['frames'], items['edges'], items['lines'], items['edges'], items['lines'],
-                                         items['masks'])
-        print(f"i: {i}")
-        print(f"edge shape: {edge.shape}")
-        print(f"line shape: {line.shape}")
-        print(f"loss= {loss}")
-        if i == 5: break
+        # for k in items:
+        #     if type(items[k]) is torch.Tensor:
+        #         items[k] = items[k].to("cuda")
+
+        # feed all frames in one process
+        # edge, line, loss = IGPT_model(items['frames'], items['edges'], items['lines'], items['edges'], items['lines'],
+                                        #  items['masks'])
+
+        # stride 5                 
+        # original shape: [b, t, c, h, w]       
+        frame_len = items['frames'].shape[-4]  
+        edge_list, line_list, loss_list = [], [], []
+        for idx in range(0, frame_len, stride): 
+            select_frames = items['frames'][:,idx:idx+stride,:,:,:].to(device)
+            select_edges = items['edges'][:,idx:idx+stride,:,:,:].to(device)
+            select_lines = items['lines'][:,idx:idx+stride,:,:,:].to(device)
+            select_masks = items['masks'][:,idx:idx+stride,:,:,:].to(device)
+            # edge, line, loss = IGPT_model(select_frames, select_edges, select_lines, select_edges, select_lines, select_masks)
+            _, _, loss = IGPT_model(select_frames, select_edges, select_lines, select_edges, select_lines, select_masks)
+            
+            # edge_list.append(edge)
+            # line_list.append(line)
+            loss_list.append(loss)
+
+            print(f"\nvideo no.: {i}, idx: {idx}")
+            # print(f"edge shape: {edge.shape}")
+            # print(f"line shape: {line.shape}")
+            print(f"average loss= {sum(loss_list)/len(loss_list)}")
+
+        print(f"\n final loss: {sum(loss_list)/len(loss_list)}")
+        IGPT_model.zero_grad()
+        # if i == 0: break
 
 
