@@ -307,7 +307,7 @@ class ContinuousEdgeLineDatasetMask_video(Dataset):  # mostly refer to FuseForme
         line_tensors = self._to_tensors(lines)
         mask_tensors = self._to_tensors(masks)
         meta = {'frames': frame_tensors, 'masks': mask_tensors, 'edges': edge_tensors, 'lines': line_tensors, 
-                'name': video_name.split('/')[-1], 'idx': [os.path.basename(path) for path in all_frames[idx]]}
+                'name': video_name.split('/')[-1], 'idxs': [all_frames[idx].split('/')[-1] for idx in ref_index]}
         return meta
 
     def get_ref_index(self, length, sample_length):

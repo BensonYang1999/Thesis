@@ -238,7 +238,7 @@ class EdgeLineGPT256RelBCE(nn.Module):
 class EdgeLineGPT256RelBCE_video(nn.Module):
     """  the full GPT language model, with a context size of block_size """
 
-    def __init__(self, config, device):
+    def __init__(self, config, opts, device):
         super().__init__()
 
         self.pad1 = nn.ReflectionPad2d(3) # square -> bigger square (extend 3 for each side)
@@ -290,6 +290,7 @@ class EdgeLineGPT256RelBCE_video(nn.Module):
         self.l1_loss = nn.L1Loss()
 
         self.config = config
+        self.opts = opts
 
         self.apply(self._init_weights)  # initialize the weights (multiple layer initialization)
 
@@ -414,22 +415,27 @@ class EdgeLineGPT256RelBCE_video(nn.Module):
             line_targets = line_targets.view(b * t, 1, h, w)
             masks = masks.view(b * t, 1, h, w)
 
+            loss = 0
             # hole loss
-            edge_hole_loss = self.l1_loss(edge*masks, edge_targets*masks)
-            edge_hole_loss = edge_hole_loss / torch.mean(masks)
+            if "hole" in self.opts.loss_item:
+                edge_hole_loss = self.l1_loss(edge*masks, edge_targets*masks)
+                edge_hole_loss = edge_hole_loss / torch.mean(masks)
 
-            line_hole_loss = self.l1_loss(line*masks, line_targets*masks)
-            line_hole_loss = line_hole_loss / torch.mean(masks)
+                line_hole_loss = self.l1_loss(line*masks, line_targets*masks)
+                line_hole_loss = line_hole_loss / torch.mean(masks)
+                # total loss
+                loss += edge_hole_loss + line_hole_loss
 
             # valid loss
-            edge_valid_loss = self.l1_loss(edge*(1-masks), edge_targets*(1-masks))
-            edge_valid_loss = edge_valid_loss / torch.mean(1-masks)
+            if "valid" in self.opts.loss_item:
+                edge_valid_loss = self.l1_loss(edge*(1-masks), edge_targets*(1-masks))
+                edge_valid_loss = edge_valid_loss / torch.mean(1-masks)
 
-            line_valid_loss = self.l1_loss(line*(1-masks), line_targets*(1-masks))
-            line_valid_loss = line_valid_loss / torch.mean(1-masks)
+                line_valid_loss = self.l1_loss(line*(1-masks), line_targets*(1-masks))
+                line_valid_loss = line_valid_loss / torch.mean(1-masks)
+                # total loss
+                loss += edge_valid_loss + line_valid_loss
 
-            # total loss
-            loss = edge_hole_loss + line_hole_loss + edge_valid_loss + line_valid_loss
             
             # ZITS loss computation
             # edge loss
@@ -455,6 +461,11 @@ class EdgeLineGPT256RelBCE_video(nn.Module):
         return edge, line, loss
     
     def forward_with_logits(self, img_idx, edge_idx, line_idx, masks=None):
+        img_idx, edge_idx, line_idx, masks = [
+            var.unsqueeze(0) if len(var.size()) != 5 else var
+            for var in (img_idx, edge_idx, line_idx, masks)
+        ]
+
         img_idx = img_idx * (1 - masks)  # create masked image
         edge_idx = edge_idx * (1 - masks) # create masked edge
         line_idx = line_idx * (1 - masks) # create masked line

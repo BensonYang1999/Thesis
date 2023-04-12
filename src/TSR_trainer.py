@@ -608,14 +608,6 @@ class TrainerForContinuousEdgeLine_video:
                     masked_lines = torch.cat(tuple(masked_lines), dim=0)
                     original_line = torch.cat(tuple(original_line), dim=0)
 
-                    # print(f"original_edge shape: {original_edge.shape}")  # test
-                    # print(f"original_line shape: {original_line.shape}")  # test
-                    # print(f"masked_edges : {masked_edges}")  # test
-                    # print(f"masked_lines : {masked_lines}")  # test
-                    # print(f"edge_output : {edge_output}")  # test
-                    # print(f"line_output : {line_output}")  # test
-                    # return
-
                     output = torch.cat([original_edge.float(), original_line.float(), masked_edges.float(),
                                         masked_lines.float(), edge_output.float(), line_output.float()],
                                        dim=-1)[:, :, None].repeat(1, 1, 3)

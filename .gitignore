@@ -14,3 +14,4 @@ src/losses/__pycache__/
 wireframes/
 *.pyc
 src/models/__pycache__
+src/models/__pycache__/TSR_model.cpython-36.pyc

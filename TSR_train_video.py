@@ -34,7 +34,7 @@ def main_worker(rank, opts):
     # Define the model
     model_config = EdgeLineGPTConfig(embd_pdrop=0.0, resid_pdrop=0.0, n_embd=opts.n_embd, block_size=32,
                                      attn_pdrop=0.0, n_layer=opts.n_layer, n_head=opts.n_head, ref_frame_num=opts.ref_frame_num)
-    IGPT_model = EdgeLineGPT256RelBCE_video(model_config, device=gpu)
+    IGPT_model = EdgeLineGPT256RelBCE_video(model_config, opts, device=gpu)
 
     # Define the dataset
     if not opts.MaP:
@@ -78,7 +78,7 @@ def main_worker(rank, opts):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--name', type=str, default='places2_continous_edgeline', help='The name of this exp')
-    parser.add_argument('--GPU_ids', type=str, default='0,1')
+    parser.add_argument('--GPU_ids', type=str, default='0, 1')
     parser.add_argument('--ckpt_path', type=str, default='./ckpt')
     parser.add_argument('--dataset_root', type=str, default="./dataset", help='Indicate where is the root of training set folder')
     parser.add_argument('--dataset_name', type=str, default="YouTubeVOS", help='Indicate which training set')
@@ -110,6 +110,8 @@ if __name__ == '__main__':
     parser.add_argument('--gpus', type=int, default=2, help='how many GPUs in one node')
     parser.add_argument('--AMP', action='store_true', help='Automatic Mixed Precision')
     parser.add_argument('--local_rank', type=int, default=-1, help='the id of this machine')
+    # for video
+    parser.add_argument('--loss_item', type=str, nargs='+', default=["hole", "valid"], help='the id of this machine')
 
     opts = parser.parse_args()
     opts.ckpt_path = os.path.join(opts.ckpt_path, opts.name)
