@@ -12,3 +12,5 @@ my_testing/
 src/__pycache__/
 src/losses/__pycache__/
 wireframes/
+*.pyc
+src/models/__pycache__
