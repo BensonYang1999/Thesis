@@ -66,7 +66,7 @@ class BaseNetwork(nn.Module):
 
 
 class Encoder(nn.Module):
-    def __init__(self, input_ch=3):
+    def __init__(self, input_ch=6):
         super(Encoder, self).__init__()
         self.group = [1, 2, 4, 8, 1]
         self.layers = nn.ModuleList([
@@ -89,7 +89,7 @@ class Encoder(nn.Module):
             nn.Conv2d(640, 256, kernel_size=3, stride=1, padding=1, groups=8),
             nn.LeakyReLU(0.2, inplace=True),
             nn.Conv2d(512, 128, kernel_size=3, stride=1, padding=1, groups=1),
-            nn.LeakyReLU(0.2, inplace=True)
+            nn.LeakyReLU(0.2, inplace=True),
         ])
 
     def forward(self, x):
@@ -109,18 +109,21 @@ class Encoder(nn.Module):
 
 
 class InpaintGenerator(BaseNetwork):
-    def __init__(self, init_weights=True, input_ch=3):
+    def __init__(self, init_weights=True, input_ch=6, ref_frames=5):
         super(InpaintGenerator, self).__init__()
-        # channel = 256  # Original fuseFormer
-        channel = 512  # Original fuseFormer
-        hidden = 512
-        stack_num = 8
-        num_head = 4
+        channel = 256  # Original fuseFormer
+        # channel = 512  # for ZITS_video
+        hidden = 512  # Original fuseFormer
+        # hidden = 64
+        stack_num = 8 # -> oritingal fuseformer
+        # stack_num = 8
+        num_head = 4 # -> original fuseformer
+        # num_head = 1
         kernel_size = (7, 7)
         padding = (3, 3)
         stride = (3, 3)
-        # output_size = (60, 108)
-        output_size = (32, 32)
+        output_size = (60, 108)
+        # output_size = (32, 32)
         blocks = []
         dropout = 0.
         t2t_params = {'kernel_size': kernel_size, 'stride': stride, 'padding': padding, 'output_size': output_size}
@@ -145,7 +148,8 @@ class InpaintGenerator(BaseNetwork):
             nn.LeakyReLU(0.2, inplace=True),
             deconv(64, 64, kernel_size=3, padding=1),
             nn.LeakyReLU(0.2, inplace=True),
-            nn.Conv2d(64, 3, kernel_size=3, stride=1, padding=1)
+            # nn.Conv2d(64, 3, kernel_size=3, stride=1, padding=1)  # -> original fuseformer
+            nn.Conv2d(64, 2, kernel_size=3, stride=1, padding=1)  # for ZITS, output line and edge
         )
 
         if init_weights:
@@ -153,20 +157,17 @@ class InpaintGenerator(BaseNetwork):
 
     def forward(self, masked_frames):
         # extracting features
-        b = 1  # in video batch is only 1
-        t, c, h, w = masked_frames.size()
-        enc_feat = masked_frames
-        # enc_feat = self.encoder(masked_frames.view(b * t, c, h, w))
+        b, t, c, h, w = masked_frames.size()
+        enc_feat = self.encoder(masked_frames.view(b * t, c, h, w))
         _, c, h, w = enc_feat.size()
         trans_feat = self.ss(enc_feat, b)
         trans_feat = self.add_pos_emb(trans_feat)
         trans_feat = self.transformer(trans_feat)
         trans_feat = self.sc(trans_feat, t)
-        # enc_feat = enc_feat + trans_feat
-        # output = self.decoder(enc_feat)
-        # output = torch.tanh(output)
-        # return output
-        return enc_feat + trans_feat
+        enc_feat = enc_feat + trans_feat
+        output = self.decoder(enc_feat)
+        output = torch.tanh(output)
+        return output
 
 
 class deconv(nn.Module):

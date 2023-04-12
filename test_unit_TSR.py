@@ -20,7 +20,10 @@ import torch.nn as nn
 from src.models.TSR_model import EdgeLineGPT256RelBCE, EdgeLineGPTConfig
 import torchvision.transforms as T
 
+import torchvision.transforms as transforms
+from src.Fuseformer.utils import create_random_shape_with_random_motion
 from src.Fuseformer.utils import Stack, ToTorchFormatTensor, GroupRandomHorizontalFlip
+from PIL import Image
 
 import gc
 gc.collect()
@@ -44,6 +47,12 @@ logger = logging.getLogger(__name__)
 
 def to_int(x):
     return tuple(map(int, x))
+
+""" 
+My utility
+"""
+from torchvision.utils import save_image
+
 
 class ContinuousEdgeLineDatasetMask_video(Dataset):
 
@@ -179,27 +188,6 @@ class ContinuousEdgeLineDatasetMask_video(Dataset):
                 lmap[rr, cc] = np.maximum(lmap[rr, cc], value)
         return lmap
 
-    def load_item(self, index):  # from Fuseformer
-        video_name = self.video_names[index]
-        all_frames = [os.path.join(video_name, name) for name in sorted(os.listdir(video_name))]
-        all_masks = create_random_shape_with_random_motion(
-            len(all_frames), imageHeight=self.h, imageWidth=self.w)
-        ref_index = get_ref_index(len(all_frames), self.sample_length)
-        # read video frames
-        frames = []
-        masks = []
-        for idx in ref_index:
-            img = Image.open(all_frames[idx]).convert('RGB')
-            img = img.resize(self.size)
-            frames.append(img)
-            masks.append(all_masks[idx])
-        if self.split == 'train':
-            frames = GroupRandomHorizontalFlip()(frames)
-        # To tensors
-        frame_tensors = self._to_tensors(frames)*2.0 - 1.0
-        mask_tensors = self._to_tensors(masks)
-        return frame_tensors, mask_tensors
-
     def __getitem__(self, idx):
         # selected_img_name = self.image_id_list[idx]  # 目前訓練的image case名字
         video_name, frame_no = self.video_id_list[idx][0].split("/")[-2:]
@@ -251,6 +239,88 @@ class ContinuousEdgeLineDatasetMask_video(Dataset):
                 'name': os.path.join(video_name, frame_no)}
         return meta
     
+class Dataset(torch.utils.data.Dataset):
+    def __init__(self, sample=5, size=(432,240), split='train', name='YouTubeVOS', root='./datasets'):
+        self.split = split
+        self.sample_length = sample
+        self.size = self.w, self.h = size
+
+        if name == 'YouTubeVOS':
+            vid_lst_prefix = os.path.join(root, name, split+'_all_frames/JPEGImages')
+            edge_lst_prefix = os.path.join(root, name, split+'_all_frames/edges')
+            line_lst_prefix = os.path.join(root, name, split+'_all_frames/wireframes')
+            vid_lst = os.listdir(vid_lst_prefix)
+            edge_lst = os.listdir(edge_lst_prefix)
+            line_lst = os.listdir(line_lst_prefix)
+            self.video_names = [os.path.join(vid_lst_prefix, name) for name in vid_lst]
+            self.edge_names = [os.path.join(edge_lst_prefix, name) for name in edge_lst]
+            self.line_names = [os.path.join(line_lst_prefix, name) for name in line_lst]
+
+        self._to_tensors = transforms.Compose([
+            Stack(),
+            ToTorchFormatTensor(), ])
+
+    def __len__(self):
+        return len(self.video_names)
+
+    def __getitem__(self, index):
+        try:
+            item = self.load_item(index)
+        except:
+            print('Loading error in video {}'.format(self.video_names[index]))
+            item = self.load_item(0)
+        return item
+
+    def load_item(self, index):
+        video_name = self.video_names[index]
+        edge_name = self.edge_names[index]
+        line_name = self.line_names[index]
+        all_frames = [os.path.join(video_name, name) for name in sorted(os.listdir(video_name))]
+        all_edges = [os.path.join(edge_name, name) for name in sorted(os.listdir(edge_name))]
+        all_lines = [os.path.join(line_name, name) for name in sorted(os.listdir(line_name))]
+        all_masks = create_random_shape_with_random_motion(
+            len(all_frames), imageHeight=self.h, imageWidth=self.w)
+        ref_index = self.get_ref_index(len(all_frames), self.sample_length)
+
+        frames = []
+        edges = []
+        lines = []
+        masks = []
+        for idx in ref_index:
+            img = Image.open(all_frames[idx]).convert('RGB')
+            img = img.resize(self.size)
+            frames.append(img)
+            
+            edge = Image.open(all_edges[idx]).convert('L')
+            edge = edge.resize(self.size)
+            edges.append(edge)
+
+            line = Image.open(all_lines[idx]).convert('L')
+            line = line.resize(self.size)
+            lines.append(line)
+
+            masks.append(all_masks[idx])
+        if self.split == 'train':
+            prob = random.random()
+            frames = GroupRandomHorizontalFlip()(frames, prob)
+            edges = GroupRandomHorizontalFlip()(edges, prob)
+            lines = GroupRandomHorizontalFlip()(lines, prob)
+
+        # To tensors
+        frame_tensors = self._to_tensors(frames)*2.0 - 1.0
+        edge_tensors = self._to_tensors(edges)
+        line_tensors = self._to_tensors(lines)
+        mask_tensors = self._to_tensors(masks)
+        return [frame_tensors, edge_tensors, line_tensors, mask_tensors]
+
+    def get_ref_index(self, length, sample_length):
+        if random.uniform(0, 1) > 0.5:
+            ref_index = random.sample(range(length), sample_length)
+            ref_index.sort()
+        else:
+            pivot = random.randint(0, length-sample_length)
+            ref_index = [pivot+i for i in range(sample_length)]
+        return ref_index
 
 class EdgeLineGPT256RelBCE_video(nn.Module):
     """  the full GPT language model, with a context size of block_size """
@@ -361,19 +431,14 @@ class EdgeLineGPT256RelBCE_video(nn.Module):
         img_idx = img_idx * (1 - masks)  # create masked image
         edge_idx = edge_idx * (1 - masks) # create masked edge
         line_idx = line_idx * (1 - masks) # create masked line
-        img_idx, edge_idx, line_idx, masks = img_idx.squeeze(dim=0), edge_idx.squeeze(dim=0), line_idx.squeeze(dim=0), masks.squeeze(dim=0)  # 把batch的維度拿掉(video每次只處理1個)
-        edge_targets, line_targets = edge_targets.squeeze(dim=0), line_targets.squeeze(dim=0)
-        
-        img_idx = self.resize_tensor(img_idx)
-        edge_idx = self.resize_tensor(edge_idx)
-        line_idx = self.resize_tensor(line_idx)
-        masks = self.resize_tensor(masks)
-        edge_targets = self.resize_tensor(edge_targets)
-        line_targets = self.resize_tensor(line_targets)
 
-        x = torch.cat((img_idx, edge_idx, line_idx, masks), dim=1)  # concat method NEED checking (maybe is channel-wise)
-        x = torch.cat((img_idx, edge_idx, line_idx, masks), dim=1)  # concat method NEED checking (maybe is channel-wise)
-        # x = self.resize_tensor(x)
+        # for b in range(img_idx.shape[0]):
+        #     print(f"Process batch: {b}...")
+        #     for t in range(img_idx.shape[1]):
+        #         save_image(img_idx[b][t], f'tensor_img_b{b}_t{t}.png')
+
+        # [b, t, c, w, h]
+        x = torch.cat((img_idx, edge_idx, line_idx, masks), dim=2)  # concat method NEED checking (maybe is channel-wise)
 
         # Encoder: downsample
         # x = self.pad1(x)  # reflection padding
@@ -389,17 +454,11 @@ class EdgeLineGPT256RelBCE_video(nn.Module):
         # x = self.conv4(x)  # downsample 3 
         # x = self.act(x)
 
-        [t, c, h, w] = x.shape  # before here, the video data is still with Height x Width -> [50, 256, 32, 32] -> [t, c, h, w]
-        print(f"shape after concat: {x.shape}")  # test
+        [b, t, c, h, w] = x.shape  # before here, the video data is still with Height x Width -> [50, 256, 32, 32] -> [t, c, h, w]
+        # print(f"shape after concat: {x.shape}")  # test
         # x = x.view(t, c, h * w).transpose(1, 2).contiguous() # image 2D -> 1D (flatten) and change image and color channel
         # make the data into shape like -> [batch size, image(1D), channels(RGB, edge, line, mask)]
 
-        # position_embeddings = self.pos_emb[:, :h * w, :]  # each position maps to a (learnable) vector
-        # x = self.drop(x + position_embeddings)  # [b,hw,c]  # add positional embeddings, but dropping to make some position missing pos-emb
-        # x = x.permute(0, 2, 1).reshape(t, c, h, w)  # swap the image and channel back to [b, c, h*w] then reshape to [b,c,h,w]
-
-        # Feature Fusion (6 channels to 3 channels)
-        # x = self.fuse_channel(x)
 
         # Transformer blocks
         # input [50, 256, 32, 32] -> original ZITS
@@ -423,18 +482,30 @@ class EdgeLineGPT256RelBCE_video(nn.Module):
         # x = self.convt4(x)  # upsample output as the original image shape
         
         edge, line = torch.split(x, [1, 1], dim=1)  # seperate the TSR outputs
+        print(f"edge shape(after transformer): {edge.shape}")  # test
+        print(f"line shape(after transformer): {line.shape}")  # test
 
+        print(f"edge_targets shape(after transformer): {edge_targets.shape}")  # test
+        print(f"line_targets shape(after transformer): {line_targets.shape}")  # test
+        edge_targets = edge_targets.view(b * t, 1, h, w)
+        line_targets = line_targets.view(b * t, 1, h, w)
+        masks = masks.view(b * t, 1, h, w)
         # Loss computing
         if edge_targets is not None and line_targets is not None:
+            print(f"masks shape: {masks.shape}")  # test
             print(f"edge shape: {edge.shape}")  # test
             print(f"edge_targets shape: {edge_targets.shape}")  # test
+            print(f"edge.permute(0, 2, 3, 1).contiguous().view(-1, 1) shape:{edge.permute(0, 2, 3, 1).contiguous().view(-1, 1).shape}")
+            # edge loss
             loss = nnF.binary_cross_entropy_with_logits(edge.permute(0, 2, 3, 1).contiguous().view(-1, 1),
                                                       edge_targets.permute(0, 2, 3, 1).contiguous().view(-1, 1),
                                                       reduction='none')
+            # line loss
             loss = loss + nnF.binary_cross_entropy_with_logits(line.permute(0, 2, 3, 1).contiguous().view(-1, 1),
                                                              line_targets.permute(0, 2, 3, 1).contiguous().view(-1, 1),
                                                              reduction='none')
-            masks_ = masks.view(-1, 1)  # only compute the loss in the masked region
+            masks_ = masks.permute(0, 2, 3, 1).contiguous().view(-1, 1) # only compute the loss in the masked region
+            print(f"mask reshape: {masks_.shape}")  # test
 
             loss *= masks_
             loss = torch.mean(loss)
@@ -501,22 +572,18 @@ class EdgeLineGPT256RelBCE_video(nn.Module):
         return edge, line
 
 if __name__=="__main__":
-    data_path = "./data_list/davis_train_list.txt"
-    mask_path = ["./data_list/irregular_mask_list.txt"]
-    mask_rates = [1.0, 0., 0.]
-    image_size = 256
-    line_path = "./datasets/DAVIS/JPEGImages/Full-Resolution_wireframes_pkl"
+
     stride = 5
-    train_dataset = ContinuousEdgeLineDatasetMask_video(data_path, mask_path=mask_path, is_train=True,
-                                                      mask_rates=mask_rates, frame_size=image_size,
-                                                      line_path=line_path)
-    
-    # DistributedSampler(train_dataset, num_replicas=1,
-    #                                             rank=1, shuffle=True)
-    
-    train_loader = DataLoader(train_dataset, pin_memory=True,
-                                  batch_size=1 // 1,  # BS of each GPU  在影片中batch size只能設1
-                                  num_workers=1)
+
+    train_dataset = Dataset()
+
+    train_sampler = None
+    train_loader = DataLoader(
+            train_dataset,
+            batch_size= 2,
+            shuffle=(train_sampler is None), 
+            num_workers=8, 
+            sampler=train_sampler)
 
     model_config = EdgeLineGPTConfig(embd_pdrop=0.0, resid_pdrop=0.0, n_embd=256, block_size=32,
                                      attn_pdrop=0.0, n_layer=16, n_head=8)
@@ -525,44 +592,43 @@ if __name__=="__main__":
     IGPT_model.to(device)
     IGPT_model.train()
 
-    # items = next(iter(train_loader))
+    # # items = next(iter(train_loader))
     for i, items in enumerate(train_loader):
-        # img, mask, edge, line, name = items['frames'].cuda(), items['masks'].cuda(), items['edges'].cuda(), items['lines'].cuda(), items['name']
+
+        img, edge, line, mask = items
+        img, edge, line, mask = img.cuda(), edge.cuda(), line.cuda(), mask.cuda()
         # print(f"type img: {(img.shape)}")
         # print(f"type mask: {(mask.shape)}")
         # print(f"type edge: {(edge.shape)}")
         # print(f"type line: {(line.shape)}")
-        # for k in items:
-        #     if type(items[k]) is torch.Tensor:
-        #         items[k] = items[k].to("cuda")
-
         # feed all frames in one process
-        # edge, line, loss = IGPT_model(items['frames'], items['edges'], items['lines'], items['edges'], items['lines'],
-                                        #  items['masks'])
+        edge, line, loss = IGPT_model(img, edge, line, edge, line, mask)
+
+        print(f"loss: {loss}")
 
         # stride 5                 
         # original shape: [b, t, c, h, w]       
-        frame_len = items['frames'].shape[-4]  
-        edge_list, line_list, loss_list = [], [], []
-        for idx in range(0, frame_len, stride): 
-            select_frames = items['frames'][:,idx:idx+stride,:,:,:].to(device)
-            select_edges = items['edges'][:,idx:idx+stride,:,:,:].to(device)
-            select_lines = items['lines'][:,idx:idx+stride,:,:,:].to(device)
-            select_masks = items['masks'][:,idx:idx+stride,:,:,:].to(device)
-            # edge, line, loss = IGPT_model(select_frames, select_edges, select_lines, select_edges, select_lines, select_masks)
-            _, _, loss = IGPT_model(select_frames, select_edges, select_lines, select_edges, select_lines, select_masks)
+        # frame_len = items['frames'].shape[-4]  
+        # edge_list, line_list, loss_list = [], [], []
+        # for idx in range(0, frame_len, stride): 
+        #     select_frames = items['frames'][:,idx:idx+stride,:,:,:].to(device)
+        #     select_edges = items['edges'][:,idx:idx+stride,:,:,:].to(device)
+        #     select_lines = items['lines'][:,idx:idx+stride,:,:,:].to(device)
+        #     select_masks = items['masks'][:,idx:idx+stride,:,:,:].to(device)
+        #     # edge, line, loss = IGPT_model(select_frames, select_edges, select_lines, select_edges, select_lines, select_masks)
+        #     _, _, loss = IGPT_model(select_frames, select_edges, select_lines, select_edges, select_lines, select_masks)
             
-            # edge_list.append(edge)
-            # line_list.append(line)
-            loss_list.append(loss)
+        #     # edge_list.append(edge)
+        #     # line_list.append(line)
+        #     loss_list.append(loss)
 
-            print(f"\nvideo no.: {i}, idx: {idx}")
-            # print(f"edge shape: {edge.shape}")
-            # print(f"line shape: {line.shape}")
-            print(f"average loss= {sum(loss_list)/len(loss_list)}")
+        #     print(f"\nvideo no.: {i}, idx: {idx}")
+        #     # print(f"edge shape: {edge.shape}")
+        #     # print(f"line shape: {line.shape}")
+        #     print(f"average loss= {sum(loss_list)/len(loss_list)}")
 
-        print(f"\n final loss: {sum(loss_list)/len(loss_list)}")
-        IGPT_model.zero_grad()
+        # print(f"\n final loss: {sum(loss_list)/len(loss_list)}")
+        # IGPT_model.zero_grad()
         # if i == 0: break
 
 

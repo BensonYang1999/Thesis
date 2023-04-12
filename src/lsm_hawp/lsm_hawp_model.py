@@ -9,6 +9,11 @@ from torchvision.transforms import functional as F
 from skimage.transform import resize
 import pickle
 
+from PIL import Image as im
+import skimage.draw
+from skimage.feature import canny
+from skimage.color import rgb2gray
+import cv2
 
 class ResizeImage(object):
     def __init__(self, image_height, image_width):
@@ -86,6 +91,64 @@ class LSM_HAWP:
                             scores.append(score)
                 wireframe_info = {'lines': lines, 'scores': scores}
                 with open(os.path.join(output_path, img_path.split('/')[-1].split('.')[0] + '.pkl'), 'wb') as w:
+                    pickle.dump(wireframe_info, w)
+    
+    def wireframe_detect_visualize(self, img_paths, output_wire_pkl_path, output_wire_path, output_edge_path, size):
+        def to_int(x):
+            return tuple(map(int, x))
+        
+        self.lsm_hawp.eval()
+        with torch.no_grad():
+            for img_path in tqdm(img_paths):
+                image = io.imread(img_path).astype(float)
+                if len(image.shape) == 3:
+                    image = image[:, :, :3]
+                else:
+                    image = image[:, :, None]
+                    image = np.tile(image, [1, 1, 3])
+                image = self.transform(image).unsqueeze(0).cuda()
+                output = self.lsm_hawp(image)
+                output = to_device(output, 'cpu')
+                lines = []
+                scores = []
+                if output['num_proposals'] > 0:
+                    lines_tmp = output['lines_pred'].numpy()
+                    scores_tmp = output['lines_score'].tolist()
+                    for line, score in zip(lines_tmp, scores_tmp):
+                        if score > self.threshold:
+                            # y1, x1, y2, x2
+                            lines.append([line[1], line[0], line[3], line[2]])
+                            scores.append(score)
+                wireframe_info = {'lines': lines, 'scores': scores}
+
+                # Draw line image (.png)
+                lmap = np.zeros((size, size))
+                for i in range(len(wireframe_info['scores'])):  # 所有偵測到的線條
+                    if wireframe_info['scores'][i] > 0.8:  # 依序檢查，有超過threshold的線條才會拿來使用
+                        line = wireframe_info['lines'][i].copy()
+                        line[0] = line[0] * size
+                        line[1] = line[1] * size
+                        line[2] = line[2] * size
+                        line[3] = line[3] * size
+                        rr, cc, value = skimage.draw.line_aa(*to_int(line[0:2]), *to_int(line[2:4]))
+                        # lmap[rr, cc] = np.maximum(lmap[rr, cc], value) 
+                        lmap[rr, cc] = 255
+
+                img = im.fromarray(lmap)
+                if img.mode != 'L':
+                    img = img.convert('L')
+                img.save(os.path.join(output_wire_path, img_path.split('/')[-1].split('.')[0] + '.png'))
+
+                # Draw edge image (.png)
+                img_rgb = cv2.imread(img_path)
+                edge = canny(rgb2gray(img_rgb), sigma=2, mask=None).astype(np.float)*255
+                img_edge = im.fromarray(edge)
+                if img_edge.mode != 'L':
+                    img_edge = img_edge.convert('L')
+                img_edge.save(os.path.join(output_edge_path, img_path.split('/')[-1].split('.')[0] + '.png'))
+
+                # dump line (.pkl)
+                with open(os.path.join(output_wire_pkl_path, img_path.split('/')[-1].split('.')[0] + '.pkl'), 'wb') as w:
                     pickle.dump(wireframe_info, w)
 
     def wireframe_places2_detect(self, img_paths, output_path):

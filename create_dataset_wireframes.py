@@ -18,10 +18,14 @@ Need these folders:
 """
 
 ckpt_path = "ckpt/best_lsm_hawp.pth"
-dataset_roots = {'DAVIS': './datasets/DAVIS/JPEGImages/Full-Resolution', 'YouTubeVOS': './datasets/YouTubeVOS/train_all_frames/JPEGImages'}
-wire_pkl_roots = {'DAVIS': './datasets/DAVIS/JPEGImages/Full-Resolution_wireframes_pkl', 'YouTubeVOS': './datasets/YouTubeVOS/train_all_frames/wireframes_pkl'}
-wire_roots = {'DAVIS': './datasets/DAVIS/JPEGImages/Full-Resolution_wireframes', 'YouTubeVOS': './datasets/YouTubeVOS/train_all_frames/wireframes'}
-edge_roots = {'DAVIS': './datasets/DAVIS/JPEGImages/Full-Resolution_edges', 'YouTubeVOS': './datasets/YouTubeVOS/train_all_frames/edges'}
+# dataset_roots = {'DAVIS': './datasets/DAVIS/JPEGImages/Full-Resolution', 'YouTubeVOS': './datasets/YouTubeVOS/train_all_frames/JPEGImages'}
+# wire_pkl_roots = {'DAVIS': './datasets/DAVIS/JPEGImages/Full-Resolution_wireframes_pkl', 'YouTubeVOS': './datasets/YouTubeVOS/train_all_frames/wireframes_pkl'}
+# wire_roots = {'DAVIS': './datasets/DAVIS/JPEGImages/Full-Resolution_wireframes', 'YouTubeVOS': './datasets/YouTubeVOS/train_all_frames/wireframes'}
+# edge_roots = {'DAVIS': './datasets/DAVIS/JPEGImages/Full-Resolution_edges', 'YouTubeVOS': './datasets/YouTubeVOS/train_all_frames/edges'}
+dataset_roots = {'YouTubeVOS': './datasets/YouTubeVOS/test_all_frames/JPEGImages'}
+wire_pkl_roots = {'YouTubeVOS': './datasets/YouTubeVOS/test_all_frames/wireframes_pkl'}
+wire_roots = {'YouTubeVOS': './datasets/YouTubeVOS/test_all_frames/wireframes'}
+edge_roots = {'YouTubeVOS': './datasets/YouTubeVOS/test_all_frames/edges'}
 
 os.environ['CUDA_VISIBLE_DEVICES'] = '1'
 
@@ -34,7 +38,7 @@ if __name__ == '__main__':
     time_costs = {}
 
     for dataset, root in dataset_roots.items():
-        info_csv = os.path.join("./datasets/", dataset, "video_wireCounts.csv")
+        info_csv = os.path.join("./datasets/", dataset, "valid_all_frames_video_wireCounts.csv")
         if os.path.exists(info_csv):
             os.remove(info_csv)
 
@@ -51,12 +55,12 @@ if __name__ == '__main__':
             os.makedirs(output_edge_path, exist_ok=True)
 
             img_paths = glob(input_path + '/*')
-            count = model.wireframe_detect_visualize(img_paths, output_wire_pkl_path, output_wire_path, output_edge_path, size=512)
+            model.wireframe_detect_visualize(img_paths, output_wire_pkl_path, output_wire_path, output_edge_path, size=512)
 
-            with open(info_csv, 'a', newline='') as csvfile:
-                writer = csv.writer(csvfile)
-                count.insert(0, video_name)
-                writer.writerow(count)
+            # with open(info_csv, 'a', newline='') as csvfile:
+            #     writer = csv.writer(csvfile)
+            #     count.insert(0, video_name)
+            #     writer.writerow(count)
 
         end_t = time.time()
         time_costs[dataset] = round((end_t-start_t), 4)

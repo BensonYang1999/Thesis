@@ -4,10 +4,16 @@ import os
 import sys
 import torch
 from datasets.dataset_TSR import ContinuousEdgeLineDatasetMask, ContinuousEdgeLineDatasetMaskFinetune
+from datasets.dataset_TSR import ContinuousEdgeLineDatasetMask_video
 from src.TSR_trainer import TrainerConfig, TrainerForContinuousEdgeLine, TrainerForEdgeLineFinetune
+from src.TSR_trainer import TrainerForContinuousEdgeLine_video
 from src.models.TSR_model import EdgeLineGPT256RelBCE, EdgeLineGPTConfig
+from src.models.TSR_model import EdgeLineGPT256RelBCE_video
 from src.utils import set_seed
 
+# torch.cuda.set_per_process_memory_fraction(0.8, 1)
+torch.cuda.empty_cache()
+os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "max_split_size_mb:1024"
 
 def main_worker(rank, opts):
     set_seed(42)
@@ -28,15 +34,22 @@ def main_worker(rank, opts):
     # Define the model
     model_config = EdgeLineGPTConfig(embd_pdrop=0.0, resid_pdrop=0.0, n_embd=opts.n_embd, block_size=32,
                                      attn_pdrop=0.0, n_layer=opts.n_layer, n_head=opts.n_head)
-    IGPT_model = EdgeLineGPT256RelBCE(model_config)
+    IGPT_model = EdgeLineGPT256RelBCE_video(model_config, device=gpu)
 
     # Define the dataset
     if not opts.MaP:
-        train_dataset = ContinuousEdgeLineDatasetMask(opts.data_path, mask_path=opts.mask_path, is_train=True,
-                                                      mask_rates=opts.mask_rates, image_size=opts.image_size,
+        # image
+        # train_dataset = ContinuousEdgeLineDatasetMask(opts.data_path, mask_path=opts.mask_path, is_train=True,
+        #                                               mask_rates=opts.mask_rates, image_size=opts.image_size,
+        #                                               line_path=opts.train_line_path)
+        # test_dataset = ContinuousEdgeLineDatasetMask(opts.validation_path, test_mask_path=opts.valid_mask_path,
+        #                                              is_train=False, image_size=opts.image_size,
+        #                                              line_path=opts.val_line_path)
+        train_dataset = ContinuousEdgeLineDatasetMask_video(opts.data_path, mask_path=opts.mask_path, is_train=True,
+                                                      mask_rates=opts.mask_rates, frame_size=opts.image_size,
                                                       line_path=opts.train_line_path)
-        test_dataset = ContinuousEdgeLineDatasetMask(opts.validation_path, test_mask_path=opts.valid_mask_path,
-                                                     is_train=False, image_size=opts.image_size,
+        test_dataset = ContinuousEdgeLineDatasetMask_video(opts.validation_path, test_mask_path=opts.valid_mask_path,
+                                                     is_train=False, frame_size=opts.image_size,
                                                      line_path=opts.val_line_path)
     else:
         train_dataset = ContinuousEdgeLineDatasetMaskFinetune(opts.data_path, mask_path=opts.mask_path, is_train=True,
@@ -46,7 +59,8 @@ def main_worker(rank, opts):
                                                              is_train=False, image_size=opts.image_size,
                                                              line_path=opts.val_line_path)
 
-    iterations_per_epoch = len(train_dataset.image_id_list) // opts.batch_size
+    # iterations_per_epoch = len(train_dataset.image_id_list) // opts.batch_size
+    iterations_per_epoch = len(train_dataset.video_id_list) // opts.batch_size   # video
     train_epochs = opts.train_epoch
     train_config = TrainerConfig(max_epochs=train_epochs, batch_size=opts.batch_size,
                                  learning_rate=opts.lr, betas=(0.9, 0.95),
@@ -60,6 +74,8 @@ def main_worker(rank, opts):
     if not opts.MaP:
         trainer = TrainerForContinuousEdgeLine(IGPT_model, train_dataset, test_dataset, train_config, gpu, rank,
                                                iterations_per_epoch, logger=logger)
+        trainer = TrainerForContinuousEdgeLine_video(IGPT_model, train_dataset, test_dataset, train_config, gpu, rank,
+                                               iterations_per_epoch, logger=logger)
     else:
         trainer = TrainerForEdgeLineFinetune(IGPT_model, train_dataset, test_dataset, train_config, gpu, rank,
                                              iterations_per_epoch, logger=logger)
@@ -71,13 +87,15 @@ def main_worker(rank, opts):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--name', type=str, default='places2_continous_edgeline', help='The name of this exp')
-    parser.add_argument('--GPU_ids', type=str, default='0')
+    parser.add_argument('--GPU_ids', type=str, default='1')
     parser.add_argument('--ckpt_path', type=str, default='./ckpt')
     parser.add_argument('--data_path', type=str, default=None, help='Indicate where is the training set')
     parser.add_argument('--train_line_path', type=str, default=None, help='Indicate where is the wireframes of training set')
     parser.add_argument('--mask_path', type=list, default=['data_list/irregular_mask_list.txt', 'data_list/coco_mask_list.txt'])
-    parser.add_argument('--mask_rates', type=list, default=[0.4, 0.8, 1.0],
-                        help='irregular rate, coco rate, addition rate')
+    parser.add_argument('--mask_rates', type=list, default=[1., 0., 0.],
+                        help='irregular rate, coco rate, addition rate')  # for video
+    # parser.add_argument('--mask_rates', type=list, default=[0.4, 0.8, 1.0],
+    #                     help='irregular rate, coco rate, addition rate')
     parser.add_argument('--batch_size', type=int, default=32)
     parser.add_argument('--train_epoch', type=int, default=12, help='how many epochs')
     parser.add_argument('--print_freq', type=int, default=100, help='While training, the freq of printing log')
@@ -109,8 +127,7 @@ if __name__ == '__main__':
     os.environ['MASTER_ADDR'] = 'localhost'
     os.environ['MASTER_PORT'] = '12380'
     rank = 0
-    torch.cuda.set_device(rank)
-
+    # torch.cuda.set_device(rank)
     logging.basicConfig(
         format="%(asctime)s - %(levelname)s - %(name)s -   %(message)s",
         datefmt="%m/%d/%Y %H:%M:%S",
