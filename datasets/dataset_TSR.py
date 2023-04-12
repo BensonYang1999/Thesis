@@ -277,14 +277,11 @@ class ContinuousEdgeLineDatasetMask_video(Dataset):  # mostly refer to FuseForme
         all_masks = create_random_shape_with_random_motion(
             len(all_frames), imageHeight=self.h, imageWidth=self.w)
         ref_index = self.get_ref_index(len(all_frames), self.sample_length)
-        print(f"ref_index: {ref_index}")  # test
-
         frames = []
         edges = []
         lines = []
         masks = []
         for idx in ref_index:
-            print(f"ref : {all_frames[idx]}")
             img = Image.open(all_frames[idx]).convert('RGB')
             img = img.resize(self.size)
             frames.append(img)
