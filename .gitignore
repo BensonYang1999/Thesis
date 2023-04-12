@@ -1,0 +1,14 @@
+*.png
+*.jpg
+*.zip
+datasets/DAVIS/
+datasets/Indoor/
+datasets/YouTubeVOS/
+datasets/__MACOSX/
+datasets/__pycache__/
+datasets/coco_mask/
+datasets/irregular_mask/
+my_testing/
+src/__pycache__/
+src/losses/__pycache__/
+wireframes/
