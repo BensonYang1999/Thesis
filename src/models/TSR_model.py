@@ -424,7 +424,7 @@ class EdgeLineGPT256RelBCE_video(nn.Module):
                 line_hole_loss = self.l1_loss(line*masks, line_targets*masks)
                 line_hole_loss = line_hole_loss / torch.mean(masks)
                 # total loss
-                loss += edge_hole_loss + line_hole_loss
+                loss += ( edge_hole_loss + line_hole_loss ) * self.opts.loss_weight[0]
 
             # valid loss
             if "valid" in self.opts.loss_item:
@@ -434,7 +434,7 @@ class EdgeLineGPT256RelBCE_video(nn.Module):
                 line_valid_loss = self.l1_loss(line*(1-masks), line_targets*(1-masks))
                 line_valid_loss = line_valid_loss / torch.mean(1-masks)
                 # total loss
-                loss += edge_valid_loss + line_valid_loss
+                loss += ( edge_valid_loss + line_valid_loss ) * self.opts.loss_weight[1]
 
             
             # ZITS loss computation
