@@ -277,12 +277,14 @@ class ContinuousEdgeLineDatasetMask_video(Dataset):  # mostly refer to FuseForme
         all_masks = create_random_shape_with_random_motion(
             len(all_frames), imageHeight=self.h, imageWidth=self.w)
         ref_index = self.get_ref_index(len(all_frames), self.sample_length)
+        print(f"ref_index: {ref_index}")  # test
 
         frames = []
         edges = []
         lines = []
         masks = []
         for idx in ref_index:
+            print(f"ref : {all_frames[idx]}")
             img = Image.open(all_frames[idx]).convert('RGB')
             img = img.resize(self.size)
             frames.append(img)
@@ -307,7 +309,8 @@ class ContinuousEdgeLineDatasetMask_video(Dataset):  # mostly refer to FuseForme
         edge_tensors = self._to_tensors(edges)
         line_tensors = self._to_tensors(lines)
         mask_tensors = self._to_tensors(masks)
-        meta = {'frames': frame_tensors, 'masks': mask_tensors, 'edges': edge_tensors, 'lines': line_tensors, 'name': video_name.split('/')[-1]}
+        meta = {'frames': frame_tensors, 'masks': mask_tensors, 'edges': edge_tensors, 'lines': line_tensors, 
+                'name': video_name.split('/')[-1], 'idx': [os.path.basename(path) for path in all_frames[idx]]}
         return meta
 
     def get_ref_index(self, length, sample_length):
