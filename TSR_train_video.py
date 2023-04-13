@@ -39,8 +39,8 @@ def main_worker(rank, opts):
     # Define the dataset
     if not opts.MaP:
 
-        train_dataset = ContinuousEdgeLineDatasetMask_video(sample=opts.ref_frame_num, size=(432,240), split='train', name=opts.dataset_name, root=opts.dataset_root)
-        test_dataset = ContinuousEdgeLineDatasetMask_video(sample=opts.ref_frame_num, size=(432,240), split='valid', name=opts.dataset_name, root=opts.dataset_root)
+        train_dataset = ContinuousEdgeLineDatasetMask_video(sample=opts.ref_frame_num, size=(opts.image_w,opts.image_h), split='train', name=opts.dataset_name, root=opts.dataset_root)
+        test_dataset = ContinuousEdgeLineDatasetMask_video(sample=opts.ref_frame_num, size=(opts.image_w,opts.image_h), split='valid', name=opts.dataset_name, root=opts.dataset_root)
 
     else:  # TODO
         train_dataset = ContinuousEdgeLineDatasetMaskFinetune(opts.data_path, mask_path=opts.mask_path, is_train=True,
@@ -95,6 +95,8 @@ if __name__ == '__main__':
     parser.add_argument('--validation_path', type=str, default=None, help='where is the validation set of ImageNet')
     # parser.add_argument('--val_line_path', type=str, default=None, help='Indicate where is the wireframes of val set')
     # parser.add_argument('--valid_mask_path', type=str, default=None)
+    parser.add_argument('--image_w', type=int, default=432, help='input frame width')
+    parser.add_argument('--image_h', type=int, default=240, help='input frame height')
     parser.add_argument('--image_size', type=int, default=256, help='input sequence length = image_size*image_size')
     parser.add_argument('--resume_ckpt', type=str, default='latest.pth', help='start from where, the default is latest')
     # Mask and predict finetune
