@@ -409,13 +409,15 @@ class EdgeLineGPT256RelBCE_video(nn.Module):
         
         edge, line = torch.split(x, [1, 1], dim=1)  # seperate the TSR outputs
 
+        loss = 0
+        edge_hole_loss, edge_valid_loss = 0, 0
+        line_hole_loss, line_valid_loss = 0, 0
         # Loss computing
         if edge_targets is not None and line_targets is not None:
             edge_targets = edge_targets.view(b * t, 1, h, w)
             line_targets = line_targets.view(b * t, 1, h, w)
             masks = masks.view(b * t, 1, h, w)
 
-            loss = 0
             # hole loss
             if "hole" in self.opts.loss_item:
                 edge_hole_loss = self.l1_loss(edge*masks, edge_targets*masks)
@@ -458,7 +460,13 @@ class EdgeLineGPT256RelBCE_video(nn.Module):
         edge, line = self.act_last(edge), self.act_last(line)  # sigmoid activate
         edge, line = edge.view(b, t, 1, h, w), line.view(b, t, 1, h, w)
 
-        return edge, line, loss
+        edge_hole_loss *= self.opts.loss_weight[0]
+        edge_valid_loss *= self.opts.loss_weight[1]
+        line_hole_loss *= self.opts.loss_weight[0]
+        line_valid_loss *= self.opts.loss_weight[1]
+        loss_detail = [edge_hole_loss, edge_valid_loss, line_hole_loss, line_valid_loss]
+
+        return edge, line, loss, loss_detail
     
     def forward_with_logits(self, img_idx, edge_idx, line_idx, masks=None):
         img_idx, edge_idx, line_idx, masks = [
