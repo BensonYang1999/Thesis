@@ -43,7 +43,7 @@ print(f"edge: {edges2}")
 # display results
 fig, ax = plt.subplots(nrows=1, ncols=5, figsize=(30, 5))
 
-ax[0].imshow(image_origin)
+ax[0].imshow(image_origin) # type: ignore
 ax[0].set_title('RGB image', fontsize=10)
 
 ax[1].imshow(image, cmap='gray')
@@ -75,4 +75,5 @@ print(f"edge shape: {type(edges2)}")
 # edge = cv2.normalize(edge, dst=None, alpha=0, beta=255,norm_type=cv2.NORM_MINMAX, dtype=cv2.CV_8U)
 # print(f"edge: {edge}")
 # cv2.imwrite(os.path.join(output_edge_path, img.split('/')[-1]), edge)
+edges2 = np.where(edges2 > 0.0, 1.0, 0.0)
 cv2.imwrite("canny_tmp.jpg", edges2*255)
