@@ -598,6 +598,7 @@ class TrainerForContinuousEdgeLine_video:
                         self.logger.info(
                             f"epoch {epoch + 1} iter {it}/{self.iterations_per_epoch}: train loss {loss.item():.5f}. lr {lr:e}")
 
+                    edge_P, edge_R, edge_F1, line_P, line_R, line_F1 = 0 , 0, 0, 0, 0, 0
                     if self.iterations % 100 == 1:
                         edge = edge.permute(1,0,2,3,4)[0]
                         line = line.permute(1,0,2,3,4)[0]

@@ -407,8 +407,8 @@ class EdgeLineGPT256RelBCE_video(nn.Module):
         # x = self.padt(x)  # padding back
         # x = self.convt4(x)  # upsample output as the original image shape
         
+        edge, line = self.act_last(edge), self.act_last(line) # try activate here
         edge, line = torch.split(x, [1, 1], dim=1)  # seperate the TSR outputs
-        # edge, line = self.act_last(edge), self.act_last(line) # try activate here
 
         loss = 0
         edge_hole_loss, edge_valid_loss = 0, 0
@@ -458,7 +458,7 @@ class EdgeLineGPT256RelBCE_video(nn.Module):
         else:
             loss = 0
 
-        edge, line = self.act_last(edge), self.act_last(line)  # sigmoid activate 
+        # edge, line = self.act_last(edge), self.act_last(line)  # sigmoid activate 
         edge, line = edge.view(b, t, 1, h, w), line.view(b, t, 1, h, w)
 
         edge_hole_loss *= self.opts.loss_weight[0]
