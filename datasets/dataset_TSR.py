@@ -235,6 +235,17 @@ class ContinuousEdgeLineDatasetMaskFinetune(ContinuousEdgeLineDatasetMask):
 
         return meta
 
+class SetNonZeroToOne:
+    def __call__(self, tensor):
+        tensor[tensor != 0] = 1
+        return tensor
+
+class MinMaxNormalize(torch.nn.Module):
+    def forward(self, image_tensor):
+        max_value = image_tensor.max()
+        min_value = image_tensor.min()
+        return (image_tensor - min_value) / (max_value - min_value)
+
 class ContinuousEdgeLineDatasetMask_video(Dataset):  # mostly refer to FuseFormer
     def __init__(self, sample=5, size=(432,240), split='train', name='YouTubeVOS', root='./datasets'):
         self.split = split
@@ -256,15 +267,11 @@ class ContinuousEdgeLineDatasetMask_video(Dataset):  # mostly refer to FuseForme
             Stack(),
             ToTorchFormatTensor(), ])
 
-        class SetNonZeroToOne:
-            def __call__(self, tensor):
-                tensor[tensor != 0] = 1
-                return tensor
-
         self._to_tensors_and_normalize = transforms.Compose([
             Stack(),
             ToTorchFormatTensor(), 
-            SetNonZeroToOne(),])
+            MinMaxNormalize(),])
+            # SetNonZeroToOne(),])
 
 
     def __len__(self):
@@ -314,8 +321,10 @@ class ContinuousEdgeLineDatasetMask_video(Dataset):  # mostly refer to FuseForme
 
         # To tensors
         frame_tensors = self._to_tensors(frames)*2.0 - 1.0
-        edge_tensors = self._to_tensors_and_normalize(edges)  # try to normalize the edge to 0 or 1
-        line_tensors = self._to_tensors_and_normalize(lines) # try to normalize the line to 0 or 1
+        # edge_tensors = self._to_tensors(edges)
+        edge_tensors = self._to_tensors_and_normalize(edges)  # try to normalize
+        # line_tensors = self._to_tensors(lines)
+        line_tensors = self._to_tensors_and_normalize(lines) # try to normalize
         mask_tensors = self._to_tensors(masks)
         meta = {'frames': frame_tensors, 'masks': mask_tensors, 'edges': edge_tensors, 'lines': line_tensors, 
                 'name': video_name.split('/')[-1], 'idxs': [all_frames[idx].split('/')[-1] for idx in ref_index]}

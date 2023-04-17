@@ -39,7 +39,7 @@ if __name__ == '__main__':
     model_config = EdgeLineGPTConfig(embd_pdrop=0.0, resid_pdrop=0.0, n_embd=opts.n_embd, block_size=32,
                                      attn_pdrop=0.0, n_layer=opts.n_layer, n_head=opts.n_head, ref_frame_num=opts.ref_frame_num)
     # Load model
-    IGPT_model = EdgeLineGPT256RelBCE_video(model_config, device=gpu)
+    IGPT_model = EdgeLineGPT256RelBCE_video(model_config, opts, device=gpu)
     checkpoint = torch.load(opts.ckpt_path)
 
     if opts.ckpt_path.endswith('.pt'):
@@ -59,12 +59,12 @@ if __name__ == '__main__':
                                                    items['edges'], items['lines']],
                               mask=items['masks'], iterations=opts.iterations)
         # save separately
-        # edge_output = edge_pred.cpu() * items['masks'] + items['edges'] * (1 - items['masks'])
-        edge_output = edge_pred.cpu()
+        edge_output = edge_pred.cpu() * items['masks'] + items['edges'] * (1 - items['masks'])
+        # edge_output = edge_pred.cpu()
         edge_output = edge_output.repeat(1, 3, 1, 1).permute(0, 2, 3, 1)   # gray -> rgb
         
-        # line_output = line_pred.cpu() * items['masks'] + items['lines'] * (1 - items['masks'])
-        line_output = line_pred.cpu()
+        line_output = line_pred.cpu() * items['masks'] + items['lines'] * (1 - items['masks'])
+        # line_output = line_pred.cpu()
         line_output = line_output.repeat(1, 3, 1, 1).permute(0, 2, 3, 1)  # gray -> rgb
 
         edge_output = (edge_output * 255).detach().numpy().astype(np.uint8)

@@ -8,14 +8,15 @@ from scipy import ndimage as ndi
 from multiprocessing import Pool, cpu_count
 from tqdm import tqdm
 
-dataset_roots = {'YouTubeVOS': './datasets/YouTubeVOS/test_all_frames/JPEGImages'}
-edge_roots = {'YouTubeVOS': './datasets/YouTubeVOS/test_all_frames/edges_gau2_canny2'}
+dataset_roots = {'YouTubeVOS': './datasets/YouTubeVOS/train_all_frames/JPEGImages'}
+edge_roots = {'YouTubeVOS': './datasets/YouTubeVOS/train_all_frames/edges_old_1024'}
 
 def process_video(args):
     video_path, output_edge_path = args
     for img in glob(video_path + '/*'):
         image = rgb2gray(cv2.imread(img))
-        edge = feature.canny(ndi.gaussian_filter(image, 2), sigma=2).astype(float)
+        # edge = feature.canny(ndi.gaussian_filter(image, 2), sigma=2).astype(float)  # gaussian_filter
+        edge = feature.canny(image, sigma=2).astype(float)  # canny_filter
         cv2.imwrite(os.path.join(output_edge_path, img.split('/')[-2], img.split('/')[-1]), edge * 255)
 
 def process_videos(video_paths, output_edge_path):

@@ -166,7 +166,7 @@ class InpaintGenerator(BaseNetwork):
         trans_feat = self.sc(trans_feat, t)
         enc_feat = enc_feat + trans_feat
         output = self.decoder(enc_feat)
-        output = torch.tanh(output)
+        output = torch.tanh(output)  # test because training is not working
         return output
 
 
