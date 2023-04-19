@@ -241,10 +241,34 @@ class SetNonZeroToOne:
         return tensor
 
 class MinMaxNormalize(torch.nn.Module):
+    def __init__(self, eps=1e-8):
+        super(MinMaxNormalize, self).__init__()
+        self.eps = eps
+
     def forward(self, image_tensor):
         max_value = image_tensor.max()
         min_value = image_tensor.min()
-        return (image_tensor - min_value) / (max_value - min_value)
+        return (image_tensor - min_value) / (max_value - min_value + self.eps)
+
+class StandardizeNormalize(torch.nn.Module):
+    def __init__(self, mean, std, eps=1e-8):
+        super(StandardizeNormalize, self).__init__()
+        self.mean = torch.tensor(mean, dtype=torch.float32)
+        self.std = torch.tensor(std, dtype=torch.float32)
+        self.eps = eps
+
+    def forward(self, image_tensor):
+        # Ensure the input tensors are in the range [0, 1] before standardizing
+        image_tensor = torch.clamp(image_tensor, 0, 1)
+
+        # Expand dimensions of mean and std tensors to match the dimensions of the input tensor
+        mean = self.mean.view(-1, 1, 1)
+        std = self.std.view(-1, 1, 1)
+
+        # Perform standardization
+        standardized_image = (image_tensor - mean) / (std + self.eps)
+        return standardized_image
+
 
 class ContinuousEdgeLineDatasetMask_video(Dataset):  # mostly refer to FuseFormer
     def __init__(self, sample=5, size=(432,240), split='train', name='YouTubeVOS', root='./datasets'):
@@ -267,12 +291,19 @@ class ContinuousEdgeLineDatasetMask_video(Dataset):  # mostly refer to FuseForme
             Stack(),
             ToTorchFormatTensor(), ])
 
-        self._to_tensors_and_normalize = transforms.Compose([
+        self._to_tensors_minMaxNorm = transforms.Compose([
             Stack(),
             ToTorchFormatTensor(), 
             MinMaxNormalize(),])
             # SetNonZeroToOne(),])
 
+        mean = [0.485, 0.456, 0.406]  # imagenet
+        std = [0.229, 0.224, 0.225] # imagenet
+        self._to_tensors_stdNorm = transforms.Compose([
+            Stack(),
+            ToTorchFormatTensor(),
+            StandardizeNormalize(mean, std),
+        ])
 
     def __len__(self):
         return len(self.video_names)
@@ -320,11 +351,12 @@ class ContinuousEdgeLineDatasetMask_video(Dataset):  # mostly refer to FuseForme
             lines = GroupRandomHorizontalFlip()(lines, prob)
 
         # To tensors
-        frame_tensors = self._to_tensors(frames)*2.0 - 1.0
+        frame_tensors = self._to_tensors(frames)*2.0 - 1.0 # normalize RGB to [-1, 1] -> from fuseformer
+        # frame_tensors = self._to_tensors_stdNorm(frames) 
         # edge_tensors = self._to_tensors(edges)
-        edge_tensors = self._to_tensors_and_normalize(edges)  # try to normalize
+        edge_tensors = self._to_tensors_minMaxNorm(edges)  # try to normalize
         # line_tensors = self._to_tensors(lines)
-        line_tensors = self._to_tensors_and_normalize(lines) # try to normalize
+        line_tensors = self._to_tensors_minMaxNorm(lines) # try to normalize
         mask_tensors = self._to_tensors(masks)
         meta = {'frames': frame_tensors, 'masks': mask_tensors, 'edges': edge_tensors, 'lines': line_tensors, 
                 'name': video_name.split('/')[-1], 'idxs': [all_frames[idx].split('/')[-1] for idx in ref_index]}
