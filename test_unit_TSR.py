@@ -463,11 +463,11 @@ class EdgeLineGPT256RelBCE_video(nn.Module):
         # Transformer blocks
         # input [50, 256, 32, 32] -> original ZITS
         # input [1, 5, 3, 240, 432] -> original fuseformer
-        print(f"shape before FuseFormer: {x.shape}")  # test
+        # print(f"shape before FuseFormer: {x.shape}")  # test
         x = self.fuseformerBlock(x)
-        print(f"shape after FuseFormer: {x.shape}")  # test
+        # print(f"shape after FuseFormer: {x.shape}")  # test
 
-        print(f"x shape before upsample: {x.shape}")
+        
         # Decoder: upsample
         # x = self.convt1(x) # upsample 1
         # x = self.act(x)
@@ -482,20 +482,12 @@ class EdgeLineGPT256RelBCE_video(nn.Module):
         # x = self.convt4(x)  # upsample output as the original image shape
         
         edge, line = torch.split(x, [1, 1], dim=1)  # seperate the TSR outputs
-        print(f"edge shape(after transformer): {edge.shape}")  # test
-        print(f"line shape(after transformer): {line.shape}")  # test
 
-        print(f"edge_targets shape(after transformer): {edge_targets.shape}")  # test
-        print(f"line_targets shape(after transformer): {line_targets.shape}")  # test
+        # Loss computing
         edge_targets = edge_targets.view(b * t, 1, h, w)
         line_targets = line_targets.view(b * t, 1, h, w)
         masks = masks.view(b * t, 1, h, w)
-        # Loss computing
         if edge_targets is not None and line_targets is not None:
-            print(f"masks shape: {masks.shape}")  # test
-            print(f"edge shape: {edge.shape}")  # test
-            print(f"edge_targets shape: {edge_targets.shape}")  # test
-            print(f"edge.permute(0, 2, 3, 1).contiguous().view(-1, 1) shape:{edge.permute(0, 2, 3, 1).contiguous().view(-1, 1).shape}")
             # edge loss
             loss = nnF.binary_cross_entropy_with_logits(edge.permute(0, 2, 3, 1).contiguous().view(-1, 1),
                                                       edge_targets.permute(0, 2, 3, 1).contiguous().view(-1, 1),
@@ -504,8 +496,8 @@ class EdgeLineGPT256RelBCE_video(nn.Module):
             loss = loss + nnF.binary_cross_entropy_with_logits(line.permute(0, 2, 3, 1).contiguous().view(-1, 1),
                                                              line_targets.permute(0, 2, 3, 1).contiguous().view(-1, 1),
                                                              reduction='none')
+            
             masks_ = masks.permute(0, 2, 3, 1).contiguous().view(-1, 1) # only compute the loss in the masked region
-            print(f"mask reshape: {masks_.shape}")  # test
 
             loss *= masks_
             loss = torch.mean(loss)
@@ -520,52 +512,14 @@ class EdgeLineGPT256RelBCE_video(nn.Module):
         img_idx = img_idx * (1 - masks)  # create masked image
         edge_idx = edge_idx * (1 - masks) # create masked edge
         line_idx = line_idx * (1 - masks) # create masked line
-        img_idx, edge_idx, line_idx, masks = img_idx.squeeze(dim=0), edge_idx.squeeze(dim=0), line_idx.squeeze(dim=0), masks.squeeze(dim=0)  # 把batch的維度拿掉(video每次只處理1個)
-        edge_targets, line_targets = edge_targets.squeeze(dim=0), line_targets.squeeze(dim=0)
 
-        x = torch.cat((img_idx, edge_idx, line_idx, masks), dim=1)  # concat method NEED checking (maybe is channel-wise)
+        # [b, t, c, w, h]
+        x = torch.cat((img_idx, edge_idx, line_idx, masks), dim=2)  # concat method NEED checking (maybe is channel-wise)
 
-        # Encoder: downsample
-        x = self.pad1(x)  # reflection padding
-        x = self.conv1(x)  # downsample input layer
-        x = self.act(x)  # activate with ReLU
-
-        x = self.conv2(x)  # downsample 1 
-        x = self.act(x)
-
-        x = self.conv3(x)  # downsample 2 
-        x = self.act(x)
-
-        x = self.conv4(x)  # downsample 3 
-        x = self.act(x)
-
-        [t, c, h, w] = x.shape  # before here, the video data is still with Height x Width -> [50, 256, 32, 32] -> [t, c, h, w]
-        x = x.view(t, c, h * w).transpose(1, 2).contiguous() # image 2D -> 1D (flatten) and change image and color channel
-        # make the data into shape like -> [batch size, image(1D), channels(RGB, edge, line, mask)]
-
-        position_embeddings = self.pos_emb[:, :h * w, :]  # each position maps to a (learnable) vector
-        x = self.drop(x + position_embeddings)  # [b,hw,c]  # add positional embeddings, but dropping to make some position missing pos-emb
-        x = x.permute(0, 2, 1).reshape(t, c, h, w)  # swap the image and channel back to [b, c, h*w] then reshape to [b,c,h,w]
+        [b, t, c, h, w] = x.shape  # before here, the video data is still with Height x Width -> [50, 256, 32, 32] -> [t, c, h, w]
 
         # Transformer blocks
-        # input [50, 256, 32, 32]
-        # print(f"shape before FuseFormer: {x.shape}")
         x = self.fuseformerBlock(x)
-        # print(f"shape after FuseFormer: {tmp.shape}")
-
-        # print(f"x shape: {x.shape}")
-        # Decoder: upsample
-        x = self.convt1(x) # upsample 1
-        x = self.act(x)
-
-        x = self.convt2(x) # upsample 2
-        x = self.act(x)
-
-        x = self.convt3(x) # upsample 3
-        x = self.act(x)
-
-        x = self.padt(x)  # padding back
-        x = self.convt4(x)  # upsample output as the original image shape
         
         edge, line = torch.split(x, [1, 1], dim=1)  # seperate the TSR outputs
 

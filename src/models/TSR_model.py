@@ -269,6 +269,9 @@ class EdgeLineGPT256RelBCE_video(nn.Module):
         self.act_last = nn.Sigmoid()  # original in ZITS
         # self.act_last = nn.LeakyReLU()  # original in For ZITS_video
 
+        self.loss_functions = {"l1": nn.L1Loss(), "bce": nn.BCELoss(), "mse": nn.MSELoss()}
+        self.loss_function = self.loss_functions[opts.loss_choice]
+
         # Feature Fusion (6 channels to 3 channels)
         self.fuse_channel = nn.Sequential(
             nn.Conv2d(6, 32, kernel_size=3, padding='same'),
@@ -409,6 +412,7 @@ class EdgeLineGPT256RelBCE_video(nn.Module):
         
         edge, line = torch.split(x, [1, 1], dim=1)  # seperate the TSR outputs
 
+        eps = 1e-8
         loss = 0
         edge_hole_loss, edge_valid_loss = 0, 0
         line_hole_loss, line_valid_loss = 0, 0
@@ -422,26 +426,30 @@ class EdgeLineGPT256RelBCE_video(nn.Module):
             # print(f"edge: {edge}")
 
             # hole loss
-            # opts.loss_hole_valid_weight
-            # opts.loss_edge_line_weight
             hole_weight, valid_weight = self.opts.loss_hole_valid_weight
             edge_weight, line_weight = self.opts.loss_edge_line_weight
-            edge_hole_loss = self.l1_loss(edge*masks, edge_targets*masks)
-            edge_hole_loss = edge_hole_loss / torch.mean(masks)
 
-            line_hole_loss = self.l1_loss(line*masks, line_targets*masks)
-            line_hole_loss = line_hole_loss / torch.mean(masks)
+            masks_mean = torch.mean(masks)
+            one_minus_masks_mean = torch.mean(1 - masks)
+
+            edge_hole_loss = self.loss_function(edge * masks, edge_targets * masks)
+            edge_hole_loss = edge_hole_loss / (masks_mean + eps)
+
+            line_hole_loss = self.loss_function(line * masks, line_targets * masks)
+            line_hole_loss = line_hole_loss / (masks_mean + eps)
+
             # total loss
-            loss += ( edge_hole_loss * edge_weight + line_hole_loss * line_weight ) * hole_weight
+            loss += (edge_hole_loss * edge_weight + line_hole_loss * line_weight) * hole_weight
 
             # valid loss
-            edge_valid_loss = self.l1_loss(edge*(1-masks), edge_targets*(1-masks))
-            edge_valid_loss = edge_valid_loss / torch.mean(1-masks)
+            edge_valid_loss = self.loss_function(edge * (1 - masks), edge_targets * (1 - masks))
+            edge_valid_loss = edge_valid_loss / (one_minus_masks_mean + eps)
 
-            line_valid_loss = self.l1_loss(line*(1-masks), line_targets*(1-masks))
-            line_valid_loss = line_valid_loss / torch.mean(1-masks)
+            line_valid_loss = self.loss_function(line * (1 - masks), line_targets * (1 - masks))
+            line_valid_loss = line_valid_loss / (one_minus_masks_mean + eps)
+
             # total loss
-            loss += ( edge_valid_loss * edge_weight + line_valid_loss * line_weight ) * valid_weight
+            loss += (edge_valid_loss * edge_weight + line_valid_loss * line_weight) * valid_weight
 
             
             # ZITS loss computation
