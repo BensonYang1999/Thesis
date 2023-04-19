@@ -7,11 +7,13 @@ from skimage.color import rgb2gray
 from PIL import Image as im
 from PIL import Image
 
+
 import cv2
 import os
 from skimage.feature import canny
 import torchvision.transforms as transforms
 from src.Fuseformer.utils import Stack, ToTorchFormatTensor, GroupRandomHorizontalFlip
+import torch
 
 # Generate noisy image of a square
 # image = np.zeros((128, 128), dtype=float)
@@ -84,9 +86,20 @@ def new_edge(img_path):
     cv2.imwrite('new_edge.png', edge * 255)
     return edge
 
+class MinMaxNormalize(torch.nn.Module):
+    def forward(self, image_tensor):
+        max_value = image_tensor.max()
+        min_value = image_tensor.min()
+        return (image_tensor - min_value) / (max_value - min_value)
+
 _to_tensors = transforms.Compose([
         Stack(),
         ToTorchFormatTensor(), ])
+
+_to_tensors_norm = transforms.Compose([
+        Stack(),
+        ToTorchFormatTensor(), 
+        MinMaxNormalize(),])
 
 if __name__=="__main__":
     img_path = './datasets/YouTubeVOS/train_all_frames/JPEGImages/0a8c467cc3/00000.jpg'
@@ -103,13 +116,16 @@ if __name__=="__main__":
     new_edge = Image.open('new_edge.png').convert('L')
     new_edge = new_edge.resize((432,240))
     new_edge = _to_tensors([new_edge])
+    normalized_image_tensor = Image.open('new_edge.png').convert('L')
+    normalized_image_tensor = normalized_image_tensor.resize((432,240))
+    normalized_image_tensor = _to_tensors_norm([normalized_image_tensor])
 
     # 計算最大值和最小值
     max_value = new_edge.max()
     min_value = new_edge.min()
 
     # 最小值-最大值正規化
-    normalized_image_tensor = (new_edge - min_value) / (max_value - min_value)
+    # normalized_image_tensor = (new_edge - min_value) / (max_value - min_value)
     print(f"After read")
     print(f"origin: {origin_edge.shape}, new: {new_edge.shape}")
     print(f"origin: {origin_edge}, new: {new_edge}")
