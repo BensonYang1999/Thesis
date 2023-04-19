@@ -407,7 +407,6 @@ class EdgeLineGPT256RelBCE_video(nn.Module):
         # x = self.padt(x)  # padding back
         # x = self.convt4(x)  # upsample output as the original image shape
         
-        edge, line = self.act_last(edge), self.act_last(line) # try activate here
         edge, line = torch.split(x, [1, 1], dim=1)  # seperate the TSR outputs
 
         loss = 0
@@ -419,25 +418,30 @@ class EdgeLineGPT256RelBCE_video(nn.Module):
             line_targets = line_targets.view(b * t, 1, h, w)
             masks = masks.view(b * t, 1, h, w)
 
-            # hole loss
-            if "hole" in self.opts.loss_item:
-                edge_hole_loss = self.l1_loss(edge*masks, edge_targets*masks)
-                edge_hole_loss = edge_hole_loss / torch.mean(masks)
+            # print(f"edge_targets: {edge_targets}")
+            # print(f"edge: {edge}")
 
-                line_hole_loss = self.l1_loss(line*masks, line_targets*masks)
-                line_hole_loss = line_hole_loss / torch.mean(masks)
-                # total loss
-                loss += ( edge_hole_loss + line_hole_loss ) * self.opts.loss_weight[0]
+            # hole loss
+            # opts.loss_hole_valid_weight
+            # opts.loss_edge_line_weight
+            hole_weight, valid_weight = self.opts.loss_hole_valid_weight
+            edge_weight, line_weight = self.opts.loss_edge_line_weight
+            edge_hole_loss = self.l1_loss(edge*masks, edge_targets*masks)
+            edge_hole_loss = edge_hole_loss / torch.mean(masks)
+
+            line_hole_loss = self.l1_loss(line*masks, line_targets*masks)
+            line_hole_loss = line_hole_loss / torch.mean(masks)
+            # total loss
+            loss += ( edge_hole_loss * edge_weight + line_hole_loss * line_weight ) * hole_weight
 
             # valid loss
-            if "valid" in self.opts.loss_item:
-                edge_valid_loss = self.l1_loss(edge*(1-masks), edge_targets*(1-masks))
-                edge_valid_loss = edge_valid_loss / torch.mean(1-masks)
+            edge_valid_loss = self.l1_loss(edge*(1-masks), edge_targets*(1-masks))
+            edge_valid_loss = edge_valid_loss / torch.mean(1-masks)
 
-                line_valid_loss = self.l1_loss(line*(1-masks), line_targets*(1-masks))
-                line_valid_loss = line_valid_loss / torch.mean(1-masks)
-                # total loss
-                loss += ( edge_valid_loss + line_valid_loss ) * self.opts.loss_weight[1]
+            line_valid_loss = self.l1_loss(line*(1-masks), line_targets*(1-masks))
+            line_valid_loss = line_valid_loss / torch.mean(1-masks)
+            # total loss
+            loss += ( edge_valid_loss * edge_weight + line_valid_loss * line_weight ) * valid_weight
 
             
             # ZITS loss computation
@@ -461,10 +465,10 @@ class EdgeLineGPT256RelBCE_video(nn.Module):
         # edge, line = self.act_last(edge), self.act_last(line)  # sigmoid activate 
         edge, line = edge.view(b, t, 1, h, w), line.view(b, t, 1, h, w)
 
-        edge_hole_loss *= self.opts.loss_weight[0]
-        edge_valid_loss *= self.opts.loss_weight[1]
-        line_hole_loss *= self.opts.loss_weight[0]
-        line_valid_loss *= self.opts.loss_weight[1]
+        # edge_hole_loss *= self.opts.loss_weight[0]
+        # edge_valid_loss *= self.opts.loss_weight[1]
+        # line_hole_loss *= self.opts.loss_weight[0]
+        # line_valid_loss *= self.opts.loss_weight[1]
         loss_detail = [edge_hole_loss, edge_valid_loss, line_hole_loss, line_valid_loss]
 
         return edge, line, loss, loss_detail
