@@ -271,14 +271,18 @@ class StandardizeNormalize(torch.nn.Module):
 
 
 class ContinuousEdgeLineDatasetMask_video(Dataset):  # mostly refer to FuseFormer
-    def __init__(self, sample=5, size=(432,240), split='train', name='YouTubeVOS', root='./datasets'):
+    def __init__(self, opts, sample=5, size=(432,240), split='train', name='YouTubeVOS', root='./datasets'):
         self.split = split
         self.sample_length = sample
         self.size = self.w, self.h = size
+        self.opts = opts
 
         if name == 'YouTubeVOS':
             vid_lst_prefix = os.path.join(root, name, split+'_all_frames/JPEGImages')
-            edge_lst_prefix = os.path.join(root, name, split+'_all_frames/edges')
+            if self.opts.edge_gaussian == 0:
+                edge_lst_prefix = os.path.join(root, name, split+'_all_frames/edges_old')
+            else:
+                edge_lst_prefix = os.path.join(root, name, split+'_all_frames/edges')
             line_lst_prefix = os.path.join(root, name, split+'_all_frames/wireframes')
             vid_lst = os.listdir(vid_lst_prefix)
             edge_lst = os.listdir(edge_lst_prefix)
@@ -304,6 +308,7 @@ class ContinuousEdgeLineDatasetMask_video(Dataset):  # mostly refer to FuseForme
             ToTorchFormatTensor(),
             StandardizeNormalize(mean, std),
         ])
+
 
     def __len__(self):
         return len(self.video_names)

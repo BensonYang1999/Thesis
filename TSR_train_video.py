@@ -39,8 +39,8 @@ def main_worker(rank, opts):
     # Define the dataset
     if not opts.MaP:
 
-        train_dataset = ContinuousEdgeLineDatasetMask_video(sample=opts.ref_frame_num, size=(opts.image_w,opts.image_h), split='train', name=opts.dataset_name, root=opts.dataset_root)
-        test_dataset = ContinuousEdgeLineDatasetMask_video(sample=opts.ref_frame_num, size=(opts.image_w,opts.image_h), split='valid', name=opts.dataset_name, root=opts.dataset_root)
+        train_dataset = ContinuousEdgeLineDatasetMask_video(opts, sample=opts.ref_frame_num, size=(opts.image_w,opts.image_h), split='train', name=opts.dataset_name, root=opts.dataset_root)
+        test_dataset = ContinuousEdgeLineDatasetMask_video(opts, sample=opts.ref_frame_num, size=(opts.image_w,opts.image_h), split='valid', name=opts.dataset_name, root=opts.dataset_root)
 
     else:  # TODO
         train_dataset = ContinuousEdgeLineDatasetMaskFinetune(opts.data_path, mask_path=opts.mask_path, is_train=True,
@@ -118,6 +118,13 @@ if __name__ == '__main__':
     parser.add_argument('--loss_edge_line_weight', type=float, nargs='+', default=[1.0, 0.0], help='the weight for computing the edge/line part ')
     # add the choice to decide the loss function with l1 or mse or binary cross entropy with choice
     parser.add_argument('--loss_choice', type=str, default="l1", help='the choice of loss function: l1, mse, bce')
+    parser.add_argument('--edge_gaussian', type=int, default=0, help='the sigma of gaussian kernel for edge')
+
+    # show th loss_coice and edge_gaussian and the loss_hole_valid_weight and loss_edge_line_weight
+    print("The loss_choice is: ", parser.parse_args().loss_choice)
+    print("The edge_gaussian is: ", parser.parse_args().edge_gaussian)
+    print("The loss_hole_valid_weight is: ", parser.parse_args().loss_hole_valid_weight)
+    print("The loss_edge_line_weight is: ", parser.parse_args().loss_edge_line_weight)
 
     opts = parser.parse_args()
     opts.ckpt_path = os.path.join(opts.ckpt_path, opts.name)
