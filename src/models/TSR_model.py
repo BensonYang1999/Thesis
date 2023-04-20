@@ -482,10 +482,15 @@ class EdgeLineGPT256RelBCE_video(nn.Module):
         return edge, line, loss, loss_detail
     
     def forward_with_logits(self, img_idx, edge_idx, line_idx, masks=None):
-        img_idx, edge_idx, line_idx, masks = [
-            var.unsqueeze(0) if len(var.size()) != 5 else var
-            for var in (img_idx, edge_idx, line_idx, masks)
-        ]
+        # if the shape of input is not [b, t, c, w, h], then add a dimension
+        if len(img_idx.shape) != 5:
+            img_idx = img_idx.unsqueeze(0)
+        if len(edge_idx.shape) != 5:
+            edge_idx = edge_idx.unsqueeze(0)
+        if len(line_idx.shape) != 5:
+            line_idx = line_idx.unsqueeze(0)
+        if masks is not None and len(masks.shape) != 5:
+            masks = masks.unsqueeze(0)
 
         img_idx = img_idx * (1 - masks)  # create masked image
         edge_idx = edge_idx * (1 - masks) # create masked edge
@@ -500,5 +505,7 @@ class EdgeLineGPT256RelBCE_video(nn.Module):
         x = self.fuseformerBlock(x)
         
         edge, line = torch.split(x, [1, 1], dim=1)  # seperate the TSR outputs
+        edge, line = edge.squeeze(0), line.squeeze(0)
+        edge, line = edge.view(t, 1, h, w), line.view(t, 1, h, w)
 
         return edge, line

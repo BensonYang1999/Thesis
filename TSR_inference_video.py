@@ -29,6 +29,8 @@ if __name__ == '__main__':
     parser.add_argument('--dataset_root', type=str, default="./datasets", help='Indicate where is the root of training set folder')
     parser.add_argument('--dataset_name', type=str, default="YouTubeVOS", help='Indicate which training set')
     parser.add_argument('--ref_frame_num', type=int, default=5)
+    parser.add_argument('--loss_choice', type=str, default="bce", help='the choice of loss function: l1, mse, bce')
+    parser.add_argument('--edge_gaussian', type=int, default=0, help='the sigma of gaussian kernel for edge')
 
     opts = parser.parse_args()
 
@@ -47,17 +49,25 @@ if __name__ == '__main__':
     else:
         IGPT_model.load_state_dict(checkpoint['model'])
 
-    IGPT_model.cuda()
+    IGPT_model.to("cpu")
 
-    test_dataset = ContinuousEdgeLineDatasetMask_video(sample=opts.ref_frame_num, size=(432,240), split='test', name=opts.dataset_name, root=opts.dataset_root)
+    test_dataset = ContinuousEdgeLineDatasetMask_video(opts, sample=opts.ref_frame_num, size=(432,240), split='test', name=opts.dataset_name, root=opts.dataset_root)
 
     for it in tqdm(range(test_dataset.__len__())):
 
         items = test_dataset.__getitem__(it)
+        # place data on the correct device
+        # for k in items:
+        #     if type(items[k]) is torch.Tensor:
+        #         items[k] = items[k].to(device)
 
-        edge_pred, line_pred = SampleEdgeLineLogits_video(IGPT_model, context=[items['frames'],
-                                                   items['edges'], items['lines']],
-                              mask=items['masks'], iterations=opts.iterations)
+        # edge_pred, line_pred = SampleEdgeLineLogits_video(IGPT_model, context=[items['frames'],
+        #                                            items['edges'], items['lines']],
+        #                       mask=items['masks'], iterations=opts.iterations)
+        edge_pred, line_pred = IGPT_model.forward_with_logits(img_idx=items['frames'],
+                                                    edge_idx=items['edges'], line_idx=items['lines'], masks=items['masks'])    
+
+        # items['edges'], items['lines'], items['masks'] = items['edges'].cpu(), items['lines'].cpu(), items['masks'].cpu()
         # save separately
         edge_output = edge_pred.cpu() * items['masks'] + items['edges'] * (1 - items['masks'])
         # edge_output = edge_pred.cpu()

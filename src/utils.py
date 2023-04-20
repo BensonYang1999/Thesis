@@ -327,12 +327,15 @@ def SampleEdgeLineLogits_video(model, context, mask=None, iterations=1, device='
     with torch.no_grad():
         for i in range(iterations):
             edge_logits, line_logits = model.forward_with_logits(img, edge, line, masks=mask)
-            edge_pred = torch.sigmoid(edge_logits)
-            line_pred = torch.sigmoid((line_logits + add_v) * mul_v)
+            # edge_pred = torch.sigmoid(edge_logits)
+            # edge_pred = edge_logits  # had alreadly been sigmoid in FuseFormer block
+            # line_pred = torch.sigmoid((line_logits + add_v) * mul_v)
+            line_pred = (line_logits + add_v)*mul_v   # had alreadly been sigmoid in FuseFormer block
             edge = edge + edge_pred * mask
             edge[edge >= 0.25] = 1
             edge[edge < 0.25] = 0
             line = line + line_pred * mask
+
 
             b, _, h, w = edge_pred.shape
             edge_pred = edge_pred.reshape(b, -1, 1)
