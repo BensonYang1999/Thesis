@@ -48,10 +48,16 @@ if __name__ == '__main__':
         edge_pred, line_pred = IGPT_model.forward_with_logits(img_idx=items['frames'],
                                                               edge_idx=items['edges'], line_idx=items['lines'], masks=items['masks'])
 
-        edge_output = (edge_pred.cpu() * items['masks'] + items['edges'] * (1 - items['masks'])).repeat(1, 3, 1, 1).permute(0, 2, 3, 1)
-        line_output = (line_pred.cpu() * items['masks'] + items['lines'] * (1 - items['masks'])).repeat(1, 3, 1, 1).permute(0, 2, 3, 1)
+        edge_output = (edge_pred.cpu() * (1-items['masks'])) + ((1-edge_pred.cpu()) * items['masks'])
+        edge_output = edge_output.repeat(1, 3, 1, 1).permute(0, 2, 3, 1)
+        line_output = (line_pred.cpu() * (1-items['masks'])) + ((1-line_pred.cpu()) * items['masks'])
+        line_output = line_output.repeat(1, 3, 1, 1).permute(0, 2, 3, 1)
         edge_output = (edge_output * 255).detach().numpy().astype(np.uint8)
         line_output = (line_output * 255).detach().numpy().astype(np.uint8)
+
+        # Get the original RGB image
+        original_image = ((items['frames'] + 1) * 0.5).permute(0, 2, 3, 1)
+        original_image = (original_image * 255).detach().numpy().astype(np.uint8)
 
         # Get the original image and invert the masked area
         original_edge = items['edges']*(1-items['masks']) + items['masks']*(1-items['edges'])
@@ -62,8 +68,8 @@ if __name__ == '__main__':
         original_line = (original_line * 255).detach().numpy().astype(np.uint8)
 
         # Concatenate the original image with the inverted masked area and the outputs
-        edge_output = np.concatenate((original_edge, edge_output), axis=2)
-        line_output = np.concatenate((original_line, line_output), axis=2)
+        edge_output = np.concatenate((original_image, original_edge, edge_output), axis=2)
+        line_output = np.concatenate((original_image, original_line, line_output), axis=2)
 
         edge_folder = os.path.join(opts.save_url, "edges", items['name'])
         line_folder = os.path.join(opts.save_url, "lines", items['name'])

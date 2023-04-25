@@ -5,9 +5,12 @@ python3 TSR_train_video.py --name ZITS_video_YouTubeVOS_0hole_1valid_1edge_0line
 python3 TSR_train_video.py --name ZITS_video_YouTubeVOS_0hole_1valid_1edge_0line_minMaxNorm_newEdge_bs2_bce_0419   --dataset_root ./datasets --dataset_name YouTubeVOS --batch_size 4 --train_epoch 100 --loss_hole_valid_weight 0.0 1.0 --loss_edge_line_weight 1.0 0.0 --GPU_ids 1 --loss_choice bce
 python3 TSR_train_video.py --name ZITS_video_YouTubeVOS_1hole_0valid_0.5edge_0.5line_minMaxNorm_newEdge_bs2_bce_0419   --dataset_root ./datasets --dataset_name YouTubeVOS --batch_size 4 --train_epoch 100 --loss_hole_valid_weight 1.0 0.0 --loss_edge_line_weight 0.5 0.5 --GPU_ids 0 --loss_choice bce
 
-python3 TSR_train_video.py --name ZITS_video_YouTubeVOS_1hole_0valid_05edge_05line_minMaxNorm_newEdge_bs2_bce_0419   --dataset_root ./datasets --dataset_name YouTubeVOS --batch_size 4 --train_epoch 100 --loss_hole_valid_weight 1.0 0.0 --loss_edge_line_weight 0.5 0.5 --GPU_ids 1 --loss_choice bce
+python3 TSR_train_video.py --name ZITS_video_YouTubeVOS_08hole_02valid_1edge_1line_minMaxNorm_newEdge_bs2_bce_0419   --dataset_root ./datasets --dataset_name YouTubeVOS --batch_size 4 --train_epoch 100 --loss_hole_valid_weight 0.8 0.2 --loss_edge_line_weight 1 1 --GPU_ids 1 --loss_choice bce
+
+python3 TSR_train_video.py --name ZITS_video_YouTubeVOS_08hole_02valid_1edge_1line_minMaxNorm_oldEdge_bs2_bce_0420   --dataset_root ./datasets --dataset_name YouTubeVOS --batch_size 4 --train_epoch 100 --loss_hole_valid_weight 0.8 0.2 --loss_edge_line_weight 1 1 --GPU_ids 0 --loss_choice bce --edge_gaussian 0
 
 
 ############ inference
 python3 TSR_inference_video.py --GPU_ids 1 --ckpt_path ./ckpt/ZITS_video_YouTubeVOS_1hole_0valid_0.5edge_0.5line_minMaxNorm_newEdge_bs2_bce_0419/best.pth  --save_url results/ZITS_video_YouTubeVOS_1hole_0valid_0.5edge_0.5line_minMaxNorm_newEdge_bs2_bce_0419
-python3 TSR_inference_video.py --GPU_ids 1 --ckpt_path ./ckpt/ZITS_video_YouTubeVOS_08hole_02valid_1edge_1line_minMaxNorm_newEdge_bs2_bce_0419/best.pth  --save_url results/ZITS_video_YouTubeVOS_08hole_02valid_1edge_1line_minMaxNorm_newEdge_bs2_bce_0419
+python3 TSR_inference_video_multi.py --GPU_ids 1 --ckpt_path ./ckpt/ZITS_video_YouTubeVOS_08hole_02valid_1edge_1line_minMaxNorm_newEdge_bs2_bce_0419/best.pth  --save_url results/ZITS_video_YouTubeVOS_08hole_02valid_1edge_1line_minMaxNorm_newEdge_bs2_bce_0419
+python3 TSR_inference_video_multi.py --GPU_ids 0 --ckpt_path ./ckpt/ZITS_video_YouTubeVOS_08hole_02valid_1edge_1line_minMaxNorm_oldEdge_bs2_bce_0420/best.pth  --save_url results/ZITS_video_YouTubeVOS_08hole_02valid_1edge_1line_minMaxNorm_oldEdge_bs2_bce_0420
