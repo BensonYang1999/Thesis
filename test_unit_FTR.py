@@ -131,33 +131,306 @@ class ImgDataset_video(torch.utils.data.Dataset):
             for item in sample_loader:
                 yield item
 
+class ToLongTensor:
+    def __call__(self, tensor):
+        return tensor.long()
+
+class DynamicDataset_video(torch.utils.data.Dataset):
+    def __init__(self, split='train', name='YouTubeVOS', root='./datasets', batch_size=1, add_pos=False, pos_num=128, test_mask_path=None,
+                 input_size=None, default_size=(432, 240), str_size=256,
+                 world_size=1,
+                 round=1, sample=5): 
+        # super(DynamicDataset, self).__init__()
+        self.training = (split=='train') # training or testing
+        self.batch_size = batch_size
+        self.round = round  # for places2 round is 32
+        self.sample_length = sample
+
+        self.video_name = []
+
+        if name == 'YouTubeVOS':
+            vid_lst_prefix = os.path.join(root, name, split+'_all_frames/JPEGImages')
+            edge_lst_prefix = os.path.join(root, name, split+'_all_frames/edges')
+            line_lst_prefix = os.path.join(root, name, split+'_all_frames/wireframes')
+            vid_lst = os.listdir(vid_lst_prefix)
+            edge_lst = os.listdir(edge_lst_prefix)
+            line_lst = os.listdir(line_lst_prefix)
+            self.video_names = [os.path.join(vid_lst_prefix, name) for name in vid_lst]
+            self.edge_names = [os.path.join(edge_lst_prefix, name) for name in edge_lst]
+            self.line_names = [os.path.join(line_lst_prefix, name) for name in line_lst]
+
+        self.video_name = [os.path.join(vid_lst_prefix, name) for name in vid_lst]
+
+        if self.training:
+            self.mask_list = None  # if training then generate the mask while loading item
+        else:
+            self.mask_list = glob.glob(test_mask_path + '/*')
+            self.mask_list = sorted(self.mask_list, key=lambda x: x.split('/')[-1])
+
+        self.default_size = default_size
+        if input_size is None:
+            self.input_size = self.w, self.h = default_size
+        else:
+            self.input_size = self.w, self.h = input_size
+        self.str_size = str_size  # 256 fortransformer
+        self.world_size = world_size
+
+        self.add_pos = add_pos
+        self.ones_filter = np.ones((3, 3), dtype=np.float32)
+        self.d_filter1 = np.array([[1, 1, 0], [1, 1, 0], [0, 0, 0]], dtype=np.float32)
+        self.d_filter2 = np.array([[0, 0, 0], [1, 1, 0], [1, 1, 0]], dtype=np.float32)
+        self.d_filter3 = np.array([[0, 1, 1], [0, 1, 1], [0, 0, 0]], dtype=np.float32)
+        self.d_filter4 = np.array([[0, 0, 0], [0, 1, 1], [0, 1, 1]], dtype=np.float32)
+        self.pos_num = pos_num
+
+        self._to_tensors = transforms.Compose([
+            Stack(),
+            ToTorchFormatTensor(), ])
+
+        self._to_long_tensors = transforms.Compose([
+            Stack(),
+            ToLongTensor(),  # Add the custom transform here
+        ])
+
+    def reset_dataset(self, shuffled_idx): # reset the dataset for each epoch
+        self.idx_map = {} # map the index to the barrel index
+        barrel_idx = 0
+        count = 0
+        for sid in shuffled_idx: # sid is the index of the video
+            self.idx_map[sid] = barrel_idx
+            count += 1
+            if count == self.batch_size:
+                count = 0
+                barrel_idx += 1
+        # random img size:256~512
+        if self.training:
+            barrel_num = int(len(self.video_name) / (self.batch_size * self.world_size))
+            barrel_num += 2
+            if self.round == 1:
+                self.input_size = np.clip(np.arange(32, 65,
+                                                    step=(65 - 32) / barrel_num * 2).astype(int) * 8, 256, 512).tolist()
+                self.input_size = self.input_size[::-1] + self.input_size
+            else:
+                self.input_size = []
+                input_size = np.clip(np.arange(32, 65, step=(65 - 32) / barrel_num * 2 * self.round).astype(int) * 8,
+                                     256, 512).tolist()
+                for _ in range(self.round + 1):
+                    self.input_size.extend(input_size[::-1])
+                    self.input_size.extend(input_size)
+        else:
+            self.input_size = self.default_size
+
+    def __len__(self):
+        return len(self.video_name)
+
+    def __getitem__(self, index):
+        try:
+            item = self.load_item(index)
+        except:
+            print('Loading error in video {}'.format(self.video_names[index]))
+            item = self.load_item(0)
+        return item
+
+    def load_name(self, index):
+        name = self.video_name[index]
+        return os.path.basename(name)
+
+    def load_item(self, index):
+        if type(self.input_size) == list:
+            maped_idx = self.idx_map[index]
+            if maped_idx > len(self.input_size) - 1:
+                size = 512
+            else:
+                size = self.input_size[maped_idx]
+        else:
+            size = self.input_size
+
+        video_name = self.video_name[index]
+        edge_name = self.edge_names[index]
+        line_name = self.line_names[index]
+        all_frames = [os.path.join(video_name, name) for name in sorted(os.listdir(video_name))]
+        all_edges = [os.path.join(edge_name, name) for name in sorted(os.listdir(edge_name))]
+        all_lines = [os.path.join(line_name, name) for name in sorted(os.listdir(line_name))]
+        all_masks = create_random_shape_with_random_motion(
+            len(all_frames), imageHeight=self.h, imageWidth=self.w)
+        ref_index = self.get_ref_index(len(all_frames), self.sample_length)
+
+        frames, frames_small = [], []
+        edges, edges_small = [], []
+        lines, lines_small = [], []
+        masks, masks_small = [], []
+        for idx in ref_index:
+            # load image
+            img = Image.open(all_frames[idx]).convert('RGB')
+            img = img.resize(self.input_size)
+            img_small = img.resize((self.str_size, self.str_size))
+            frames.append(img)
+            frames_small.append(img_small)
+
+            # load mask
+            mask = Image.open(all_masks[idx]).convert('L')
+            mask = mask.resize(self.input_size)
+            mask_small = mask.resize((self.str_size, self.str_size))
+            # mask_small[mask_256 > 0] = 255 # make sure the mask is binary 
+            masks.append(mask)
+            masks_small.append(mask_small)
+
+            # load edge
+            egde = Image.open(all_edges[index]).convert('L')
+            egde = egde.resize(self.input_size)
+            egde_small = egde.resize((self.str_size, self.str_size))
+            edges.append(egde)
+            edges_small.append(egde_small)
+
+            # load line
+            line = Image.open(all_lines[index]).convert('L')
+            line = line.resize(self.input_size)
+            line_small = line.resize((self.str_size, self.str_size))
+            lines.append(line)
+            lines_small.append(line_small)
+
+        # augment data
+        if self.split == 'train':
+            prob = random.random()
+            frames = GroupRandomHorizontalFlip()(frames, prob)
+            edges = GroupRandomHorizontalFlip()(edges, prob)
+            lines = GroupRandomHorizontalFlip()(lines, prob)
+            masks = GroupRandomHorizontalFlip()(masks, prob)
+
+        batch = dict()
+        batch['image'] = self._to_tensor(img)
+        batch['img_256'] = self._to_tensor(img_256, norm=True)
+        batch['mask'] = self._to_tensor(mask)
+        batch['mask_256'] = self._to_tensor(mask_256)
+        batch['edge'] = self._to_tensor(edge)
+        batch['edge_256'] = self._to_tensor(edge_256)
+        batch['line'] = self._to_tensor(line)
+        batch['line_256'] = self._to_tensor(line_256)
+        batch['size_ratio'] = size / self.default_size
+
+        batch['name'] = self.load_name(index)
+
+        # load pos encoding
+        rel_pos_list, abs_pos_list, direct_list = [], [], []
+        for idx in ref_index:
+            rel_pos, abs_pos, direct = self.load_masked_position_encoding(masks[idx])
+            rel_pos_list.append(rel_pos)
+            abs_pos_list.append(abs_pos)
+            direct_list.append(direct)
+
+        batch['rel_pos'] = self._to_long_tensor(rel_pos)
+        batch['abs_pos'] = self._to_long_tensor(abs_pos)
+        batch['direct'] = self._to_long_tensor(direct)
+
+        return batch
+
+    def load_masked_position_encoding(self, mask):
+        ori_mask = mask.copy()
+        ori_h, ori_w = ori_mask.shape[0:2]
+        ori_mask = ori_mask / 255
+        mask = cv2.resize(mask, (self.str_size, self.str_size), interpolation=cv2.INTER_AREA)
+        mask[mask > 0] = 255
+        h, w = mask.shape[0:2]
+        mask3 = mask.copy()
+        mask3 = 1. - (mask3 / 255.0)
+        pos = np.zeros((h, w), dtype=np.int32)
+        direct = np.zeros((h, w, 4), dtype=np.int32)
+        i = 0
+        while np.sum(1 - mask3) > 0:
+            i += 1
+            mask3_ = cv2.filter2D(mask3, -1, self.ones_filter)
+            mask3_[mask3_ > 0] = 1
+            sub_mask = mask3_ - mask3
+            pos[sub_mask == 1] = i
+
+            m = cv2.filter2D(mask3, -1, self.d_filter1)
+            m[m > 0] = 1
+            m = m - mask3
+            direct[m == 1, 0] = 1
+
+            m = cv2.filter2D(mask3, -1, self.d_filter2)
+            m[m > 0] = 1
+            m = m - mask3
+            direct[m == 1, 1] = 1
+
+            m = cv2.filter2D(mask3, -1, self.d_filter3)
+            m[m > 0] = 1
+            m = m - mask3
+            direct[m == 1, 2] = 1
+
+            m = cv2.filter2D(mask3, -1, self.d_filter4)
+            m[m > 0] = 1
+            m = m - mask3
+            direct[m == 1, 3] = 1
+
+            mask3 = mask3_
+
+        abs_pos = pos.copy()
+        rel_pos = pos / (self.str_size / 2)  # to 0~1 maybe larger than 1
+        rel_pos = (rel_pos * self.pos_num).astype(np.int32)
+        rel_pos = np.clip(rel_pos, 0, self.pos_num - 1)
+
+        if ori_w != w or ori_h != h:
+            rel_pos = cv2.resize(rel_pos, (ori_w, ori_h), interpolation=cv2.INTER_NEAREST)
+            rel_pos[ori_mask == 0] = 0
+            direct = cv2.resize(direct, (ori_w, ori_h), interpolation=cv2.INTER_NEAREST)
+            direct[ori_mask == 0, :] = 0
+
+        return rel_pos, abs_pos, direct
+
+    def create_iterator(self, batch_size):
+        while True:
+            sample_loader = DataLoader(
+                dataset=self,
+                batch_size=batch_size,
+                drop_last=True
+            )
+
+            for item in sample_loader:
+                yield item
+
+    def get_ref_index(self, length, sample_length):
+        if random.uniform(0, 1) > 0.5:
+            ref_index = random.sample(range(length), sample_length)
+            ref_index.sort()
+        else:
+            pivot = random.randint(0, length-sample_length)
+            ref_index = [pivot+i for i in range(sample_length)]
+        return ref_index
+
+
 # main
 if __name__ == '__main__':
     split = 'train'
 
-    dataset = ImgDataset_video(opts=None, sample=5, size=(432, 240), spit='train', name='YouTubeVOS', root='./datasets')
-    # print the first 10 video names
-    # print(dataset.video_names[:10])
+    dataset = DynamicDataset_video()
+    # test loading the dataset
+    for i in range(10):
+        batch = dataset[i]
+        print(batch['name'])
+        print(batch['size_ratio'])
+        print(batch['image'].shape)
+        print(batch['mask'].shape)
+        print(batch['edge'].shape)
+        print(batch['line'].shape)
+        print(batch['rel_pos'].shape)
+        print(batch['abs_pos'].shape)
+        print(batch['direct'].shape)
+        print()
 
-    # # test the load_name function
-    # print(dataset.load_name(0))
+    # # test the iterator
+    # iterator = dataset.create_iterator(4)
+    # for i in range(10):
+    #     batch = next(iterator)
+    #     print(batch['name'])
+    #     print(batch['size_ratio'])
+    #     print(batch['image'].shape)
+    #     print(batch['mask'].shape)
+    #     print(batch['edge'].shape)
+    #     print(batch['line'].shape)
+    #     print(batch['rel_pos'].shape)
+    #     print(batch['abs_pos'].shape)
+    #     print(batch['direct'].shape)
+    #     print()
 
-    # test the load_item function
-    print(dataset.load_item(0))
-
-    # test the create_iterator function
-    iterator = dataset.create_iterator(batch_size=2)
-    for i in range(5):
-        item = next(iterator)
-        print(item['frames'].shape, item['masks'].shape, item['name'], item['ref_index'])
-        # save the loaded item by frames and masks with jpg files
-        for j in range(5):
-            frames = item['frames'][0][j].numpy().transpose(1, 2, 0)
-            masks = item['masks'][0][j].numpy().transpose(1, 2, 0)
-            frames = (frames+1.0)*127.5
-            masks = masks*255.0
-            frames = cv2.cvtColor(frames, cv2.COLOR_RGB2BGR)
-            cv2.imwrite('frame'+str(i)+str(j)+'.jpg', frames)
-            cv2.imwrite('mask'+str(i)+str(j)+'.jpg', masks)
-            # print reference index
-            print(item['ref_index'][j])
+    
