@@ -145,6 +145,7 @@ class DynamicDataset_video(torch.utils.data.Dataset):
         self.batch_size = batch_size
         self.round = round  # for places2 round is 32
         self.sample_length = sample
+        self.split = split
 
         self.video_name = []
 
@@ -267,13 +268,13 @@ class DynamicDataset_video(torch.utils.data.Dataset):
             frames.append(img)
             frames_small.append(img_small)
 
-            # load mask
-            mask = Image.open(all_masks[idx]).convert('L')
-            mask = mask.resize(self.input_size)
-            mask_small = mask.resize((self.str_size, self.str_size))
-            # mask_small[mask_256 > 0] = 255 # make sure the mask is binary 
-            masks.append(mask)
-            masks_small.append(mask_small)
+            # # load mask
+            # mask = Image.open(all_masks[idx]).convert('L')
+            # mask = mask.resize(self.input_size)
+            # mask_small = mask.resize((self.str_size, self.str_size))
+            # # mask_small[mask_256 > 0] = 255 # make sure the mask is binary 
+            # masks.append(mask)
+            # masks_small.append(mask_small)
 
             # load edge
             egde = Image.open(all_edges[index]).convert('L')
