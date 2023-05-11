@@ -131,13 +131,14 @@ class ImgDataset_video(torch.utils.data.Dataset):
             for item in sample_loader:
                 yield item
 
-class ToLongTensor:
-    def __call__(self, tensor):
-        return tensor.long()
+class ToLongTensorFromNumpy(object):
+    """Convert numpy arrays in sample to Tensors."""
+    def __call__(self, sample):
+        return torch.from_numpy(sample).long()
 
 class DynamicDataset_video(torch.utils.data.Dataset):
     def __init__(self, split='train', name='YouTubeVOS', root='./datasets', batch_size=1, add_pos=False, pos_num=128, test_mask_path=None,
-                 input_size=None, default_size=(432, 240), str_size=256,
+                 input_size=None, default_size=256, str_size=256,
                  world_size=1,
                  round=1, sample=5): 
         # super(DynamicDataset, self).__init__()
@@ -146,7 +147,7 @@ class DynamicDataset_video(torch.utils.data.Dataset):
         self.round = round  # for places2 round is 32
         self.sample_length = sample
         self.split = split
-
+        
         self.video_name = []
 
         if name == 'YouTubeVOS':
@@ -170,9 +171,9 @@ class DynamicDataset_video(torch.utils.data.Dataset):
 
         self.default_size = default_size
         if input_size is None:
-            self.input_size = self.w, self.h = default_size
+            self.input_size = default_size
         else:
-            self.input_size = self.w, self.h = input_size
+            self.input_size = input_size
         self.str_size = str_size  # 256 fortransformer
         self.world_size = world_size
 
@@ -190,7 +191,7 @@ class DynamicDataset_video(torch.utils.data.Dataset):
 
         self._to_long_tensors = transforms.Compose([
             Stack(),
-            ToLongTensor(),  # Add the custom transform here
+            ToLongTensorFromNumpy(),  # Add the custom transform here
         ])
 
     def reset_dataset(self, shuffled_idx): # reset the dataset for each epoch
@@ -253,22 +254,26 @@ class DynamicDataset_video(torch.utils.data.Dataset):
         all_edges = [os.path.join(edge_name, name) for name in sorted(os.listdir(edge_name))]
         all_lines = [os.path.join(line_name, name) for name in sorted(os.listdir(line_name))]
         all_masks = create_random_shape_with_random_motion(
-            len(all_frames), imageHeight=self.h, imageWidth=self.w)
+            len(all_frames), imageHeight=size, imageWidth=size)
         ref_index = self.get_ref_index(len(all_frames), self.sample_length)
-
-        frames, frames_small = [], []
-        edges, edges_small = [], []
-        lines, lines_small = [], []
-        masks, masks_small = [], []
+        
+        frames, frames_256 = [], []
+        edges, edges_256 = [], []
+        lines, lines_256 = [], []
+        masks, masks_256 = [], []
         for idx in ref_index:
             # load image
             img = Image.open(all_frames[idx]).convert('RGB')
-            img = img.resize(self.input_size)
-            img_small = img.resize((self.str_size, self.str_size))
+            img = img.resize((size, size))
+            img_256 = img.resize((self.str_size, self.str_size))
             frames.append(img)
-            frames_small.append(img_small)
+            frames_256.append(img_256)
 
             # # load mask
+            mask = all_masks[idx]
+            mask_256 = mask.resize((self.str_size, self.str_size))
+            masks.append(mask)
+            masks_256.append(mask_256)
             # mask = Image.open(all_masks[idx]).convert('L')
             # mask = mask.resize(self.input_size)
             # mask_small = mask.resize((self.str_size, self.str_size))
@@ -277,18 +282,18 @@ class DynamicDataset_video(torch.utils.data.Dataset):
             # masks_small.append(mask_small)
 
             # load edge
-            egde = Image.open(all_edges[index]).convert('L')
-            egde = egde.resize(self.input_size)
-            egde_small = egde.resize((self.str_size, self.str_size))
+            egde = Image.open(all_edges[idx]).convert('L')
+            egde = egde.resize((size, size))
+            egde_256 = egde.resize((self.str_size, self.str_size))
             edges.append(egde)
-            edges_small.append(egde_small)
+            edges_256.append(egde_256)
 
             # load line
-            line = Image.open(all_lines[index]).convert('L')
-            line = line.resize(self.input_size)
-            line_small = line.resize((self.str_size, self.str_size))
+            line = Image.open(all_lines[idx]).convert('L')
+            line = line.resize((size, size))
+            line_256 = line.resize((self.str_size, self.str_size))
             lines.append(line)
-            lines_small.append(line_small)
+            lines_256.append(line_256)
 
         # augment data
         if self.split == 'train':
@@ -296,53 +301,54 @@ class DynamicDataset_video(torch.utils.data.Dataset):
             frames = GroupRandomHorizontalFlip()(frames, prob)
             edges = GroupRandomHorizontalFlip()(edges, prob)
             lines = GroupRandomHorizontalFlip()(lines, prob)
-            masks = GroupRandomHorizontalFlip()(masks, prob)
+            # masks = GroupRandomHorizontalFlip()(masks, prob)
 
         batch = dict()
-        batch['image'] = self._to_tensor(img)
-        batch['img_256'] = self._to_tensor(img_256, norm=True)
-        batch['mask'] = self._to_tensor(mask)
-        batch['mask_256'] = self._to_tensor(mask_256)
-        batch['edge'] = self._to_tensor(edge)
-        batch['edge_256'] = self._to_tensor(edge_256)
-        batch['line'] = self._to_tensor(line)
-        batch['line_256'] = self._to_tensor(line_256)
+        batch['image'] = self._to_tensors(frames)
+        batch['img_256'] = self._to_tensors(frames_256)*2.0 - 1.0 # normalize to [-1, 1]
+        batch['mask'] = self._to_tensors(masks)
+        batch['mask_256'] = self._to_tensors(masks_256)
+        batch['edge'] = self._to_tensors(edges)
+        batch['edge_256'] = self._to_tensors(edges_256)
+        batch['line'] = self._to_tensors(lines)
+        batch['line_256'] = self._to_tensors(lines_256)
         batch['size_ratio'] = size / self.default_size
 
         batch['name'] = self.load_name(index)
 
         # load pos encoding
         rel_pos_list, abs_pos_list, direct_list = [], [], []
-        for idx in ref_index:
-            rel_pos, abs_pos, direct = self.load_masked_position_encoding(masks[idx])
+        for m in masks:
+            # transfrom mask to numpy array
+            rel_pos, abs_pos, direct = self.load_masked_position_encoding(np.array(m))
             rel_pos_list.append(rel_pos)
             abs_pos_list.append(abs_pos)
             direct_list.append(direct)
-
-        batch['rel_pos'] = self._to_long_tensor(rel_pos)
-        batch['abs_pos'] = self._to_long_tensor(abs_pos)
-        batch['direct'] = self._to_long_tensor(direct)
+        
+        batch['rel_pos'] = self._to_long_tensors(rel_pos_list) 
+        batch['abs_pos'] = self._to_long_tensors(abs_pos_list) 
+        batch['direct'] = self._to_long_tensors(direct_list)
 
         return batch
 
     def load_masked_position_encoding(self, mask):
         ori_mask = mask.copy()
-        ori_h, ori_w = ori_mask.shape[0:2]
+        ori_h, ori_w = ori_mask.shape[0:2] # original size
         ori_mask = ori_mask / 255
         mask = cv2.resize(mask, (self.str_size, self.str_size), interpolation=cv2.INTER_AREA)
-        mask[mask > 0] = 255
-        h, w = mask.shape[0:2]
-        mask3 = mask.copy()
-        mask3 = 1. - (mask3 / 255.0)
-        pos = np.zeros((h, w), dtype=np.int32)
-        direct = np.zeros((h, w, 4), dtype=np.int32)
+        mask[mask > 0] = 255 # make sure the mask is binary
+        h, w = mask.shape[0:2] # resized size
+        mask3 = mask.copy() 
+        mask3 = 1. - (mask3 / 255.0) # 0 for masked area, 1 for unmasked area
+        pos = np.zeros((h, w), dtype=np.int32) # position encoding
+        direct = np.zeros((h, w, 4), dtype=np.int32) # direction encoding
         i = 0
-        while np.sum(1 - mask3) > 0:
-            i += 1
-            mask3_ = cv2.filter2D(mask3, -1, self.ones_filter)
-            mask3_[mask3_ > 0] = 1
-            sub_mask = mask3_ - mask3
-            pos[sub_mask == 1] = i
+        while np.sum(1 - mask3) > 0: # while there is still unmasked area
+            i += 1 # i is the index of the current mask
+            mask3_ = cv2.filter2D(mask3, -1, self.ones_filter) # dilate the mask
+            mask3_[mask3_ > 0] = 1 # make sure the mask is binary
+            sub_mask = mask3_ - mask3 # get the newly added area
+            pos[sub_mask == 1] = i # set the position encoding
 
             m = cv2.filter2D(mask3, -1, self.d_filter1)
             m[m > 0] = 1
@@ -366,12 +372,12 @@ class DynamicDataset_video(torch.utils.data.Dataset):
 
             mask3 = mask3_
 
-        abs_pos = pos.copy()
+        abs_pos = pos.copy() # absolute position encoding
         rel_pos = pos / (self.str_size / 2)  # to 0~1 maybe larger than 1
-        rel_pos = (rel_pos * self.pos_num).astype(np.int32)
-        rel_pos = np.clip(rel_pos, 0, self.pos_num - 1)
+        rel_pos = (rel_pos * self.pos_num).astype(np.int32) # to 0~pos_num
+        rel_pos = np.clip(rel_pos, 0, self.pos_num - 1) # clip to 0~pos_num-1
 
-        if ori_w != w or ori_h != h:
+        if ori_w != w or ori_h != h: # if the mask is resized
             rel_pos = cv2.resize(rel_pos, (ori_w, ori_h), interpolation=cv2.INTER_NEAREST)
             rel_pos[ori_mask == 0] = 0
             direct = cv2.resize(direct, (ori_w, ori_h), interpolation=cv2.INTER_NEAREST)
@@ -406,8 +412,9 @@ if __name__ == '__main__':
 
     dataset = DynamicDataset_video()
     # test loading the dataset
+    iterator = dataset.create_iterator(4)
     for i in range(10):
-        batch = dataset[i]
+        batch = next(iterator)
         print(batch['name'])
         print(batch['size_ratio'])
         print(batch['image'].shape)
@@ -418,6 +425,49 @@ if __name__ == '__main__':
         print(batch['abs_pos'].shape)
         print(batch['direct'].shape)
         print()
+        
+        # combine above image, mask, edge, line, re_pls, abs_pos, direct into one image
+        # and then save the image in the folder
+        image = batch['image']
+        mask = batch['mask']
+        edge = batch['edge']
+        line = batch['line']
+        rel_pos = batch['rel_pos']
+        abs_pos = batch['abs_pos']
+        direct = batch['direct']
+        # turn image to numpy array
+        # from torchvision.utils import make_grid, save_image
+        # combined = torch.cat(tuple(image), dim=2)
+        # combined_mask = torch.cat(tuple(mask), dim=2)
+        # combined_edge = torch.cat(tuple(edge), dim=2)
+        # combined_line = torch.cat(tuple(line), dim=2)
+        # combined_rel = torch.cat(rel_pos.unbind(dim=2), dim=1)  # unbind along the third dimension (dim=2), then concatenate along the second dimension (dim=1)
+        # combined_abs = torch.cat(abs_pos.unbind(dim=2), dim=1)
+        
+        # save_image(combined, f'combined_image_{i}.png')
+        # save_image(combined_mask, f'combined_mask_{i}.png')
+        # save_image(combined_edge, f'combined_edge_{i}.png')
+        # save_image(combined_line, f'combined_line_{i}.png')
+        # combined_rel = combined_rel.float()  # Convert to float tensor
+        # combined_rel = (combined_rel - combined_rel.min()) / (combined_rel.max() - combined_rel.min())  # Normalize to [0, 1]
+        # save_image(combined_rel, f'combined_rel_{i}.png')
+        # combined_abs = combined_abs.float()  # Convert to float tensor
+        # combined_abs = (combined_abs - combined_abs.min()) / (combined_abs.max() - combined_abs.min())  # Normalize to [0, 1]
+        # save_image(combined_abs, f'combined_abs_{i}.png')
+        
+        # # Let's assume tensor is your 4D tensor with shape [256, 256, 5, 4]
+        # direct = direct.permute(2, 3, 0, 1)  # Change the shape to [5, 4, 256, 256]
+        # direct = direct.reshape(-1, 256, 256)  # Flatten the first two dimensions, new shape is [20, 256, 256]
+
+        # # Now, we need to add a dimension for channels, because make_grid and save_image expect tensors in the shape (C, H, W) or (B, C, H, W)
+        # direct = direct.unsqueeze(1)  # New shape is [20, 1, 256, 256]
+
+        # grid = make_grid(direct, nrow=4)  # Arrange images into a grid with 4 images per row
+
+        # # Normalize to [0, 1] and save
+        # grid = (grid - grid.min()) / (grid.max() - grid.min())
+        # save_image(grid, f'grid_{i}.png')
+        
 
     # # test the iterator
     # iterator = dataset.create_iterator(4)
