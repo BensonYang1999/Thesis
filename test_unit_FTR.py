@@ -17,7 +17,7 @@ from torch.utils.data.distributed import DistributedSampler
 from torch.utils.data.dataloader import DataLoader
 
 import torch.nn as nn
-from src.models.TSR_model import EdgeLineGPT256RelBCE, EdgeLineGPTConfig
+from src.models.TSR_model import EdgeLineGPT256RelBCE_video, EdgeLineGPTConfig
 import torchvision.transforms as T
 
 import torchvision.transforms as transforms
@@ -404,6 +404,179 @@ class DynamicDataset_video(torch.utils.data.Dataset):
             pivot = random.randint(0, length-sample_length)
             ref_index = [pivot+i for i in range(sample_length)]
         return ref_index
+
+class BaseInpaintingTrainingModule_video(nn.Module):
+    def __init__(self, config, gpu, name, rank, *args, test=False, **kwargs):
+        super().__init__(*args, **kwargs)
+        print('BaseInpaintingTrainingModule init called')
+        self.global_rank = rank
+        self.config = config
+        self.iteration = 0
+        self.name = name
+        self.test = test
+        self.gen_weights_path = os.path.join(config.PATH, name + '_gen.pth')
+        self.dis_weights_path = os.path.join(config.PATH, name + '_dis.pth')
+
+        self.str_encoder = StructureEncoder(config).cuda(gpu) # structure encoder for one image
+        self.generator = ReZeroFFC(config).cuda(gpu) # generator
+        self.best = None
+
+        print('Loading %s StructureUpsampling...' % self.name)
+        self.structure_upsample = StructureUpsampling()
+        data = torch.load(config.structure_upsample_path, map_location='cpu')
+        self.structure_upsample.load_state_dict(data['model'])
+        self.structure_upsample = self.structure_upsample.cuda(gpu).eval()
+        print("Loading trained transformer...")
+        model_config = EdgeLineGPTConfig(embd_pdrop=0.0, resid_pdrop=0.0, n_embd=opts.n_embd, block_size=32,
+                                     attn_pdrop=0.0, n_layer=opts.n_layer, n_head=opts.n_head, ref_frame_num=opts.ref_frame_num) # video version
+        self.transformer = EdgeLineGPT256RelBCE_video(model_config, args, device=gpu)
+        checkpoint = torch.load(config.transformer_ckpt_path, map_location='cpu')
+        if config.transformer_ckpt_path.endswith('.pt'): 
+            self.transformer.load_state_dict(checkpoint) # load the line/edge inpainted model
+        else:
+            self.transformer.load_state_dict(checkpoint['model'])
+        self.transformer.cuda(gpu).eval()  # eval mode of line/edge inpainted model
+        self.transformer.half() # half precision
+
+        if not test:
+            # self.discriminator = NLayerDiscriminator(**self.config.discriminator).cuda(gpu) 
+            self.discriminator = net.Discriminator(
+                in_channels=3, use_sigmoid=config['losses']['GAN_LOSS'] != 'hinge').cuda(gpu)  # video version referr to FuseFormer
+            # self.adversarial_loss = NonSaturatingWithR1(**self.config.losses['adversarial'])
+            self.adversarial_loss = AdversarialLoss(type=self.config['losses']['GAN_LOSS']).cuda(gpu)
+            self.generator_average = None
+            self.last_generator_averaging_step = -1
+
+            if self.config.losses.get("l1", {"weight_known": 0})['weight_known'] > 0:
+                self.loss_l1 = nn.L1Loss(reduction='none')
+
+            if self.config.losses.get("mse", {"weight": 0})['weight'] > 0:
+                self.loss_mse = nn.MSELoss(reduction='none')
+
+            assert self.config.losses['perceptual']['weight'] == 0
+
+            if self.config.losses.get("resnet_pl", {"weight": 0})['weight'] > 0:
+                self.loss_resnet_pl = ResNetPL(**self.config.losses['resnet_pl'])
+            else:
+                self.loss_resnet_pl = None
+            self.gen_optimizer, self.dis_optimizer = self.configure_optimizers()
+            self.str_optimizer = torch.optim.Adam(self.str_encoder.parameters(), lr=config.optimizers['generator']['lr'])
+        if self.config.AMP:  # use AMP
+            self.scaler = torch.cuda.amp.GradScaler()
+        if not test:
+            self.load_rezero()  # load pretrain model
+        self.load()  # reload for restore
+
+        # reset lr
+        if not test:
+            for group in self.gen_optimizer.param_groups:
+                group['lr'] = config.optimizers['generator']['lr']
+                group['initial_lr'] = config.optimizers['generator']['lr']
+            for group in self.dis_optimizer.param_groups:
+                group['lr'] = config.optimizers['discriminator']['lr']
+                group['initial_lr'] = config.optimizers['discriminator']['lr']
+
+        if self.config.DDP and not test:
+            import apex
+            self.generator = apex.parallel.convert_syncbn_model(self.generator)
+            self.discriminator = apex.parallel.convert_syncbn_model(self.discriminator)
+            self.generator = apex.parallel.DistributedDataParallel(self.generator)
+            self.discriminator = apex.parallel.DistributedDataParallel(self.discriminator)
+
+        if self.config.optimizers['decay_steps'] is not None and self.config.optimizers['decay_steps'] > 0 and not test:
+            self.g_scheduler = torch.optim.lr_scheduler.StepLR(self.gen_optimizer, config.optimizers['decay_steps'],
+                                                               gamma=config.optimizers['decay_rate'])
+            self.d_scheduler = torch.optim.lr_scheduler.StepLR(self.dis_optimizer, config.optimizers['decay_steps'],
+                                                               gamma=config.optimizers['decay_rate'])
+            self.str_scheduler = get_lr_schedule_with_warmup(self.str_optimizer,
+                                                             num_warmup_steps=config.optimizers['warmup_steps'],
+                                                             milestone_step=config.optimizers['decay_steps'],
+                                                             gamma=config.optimizers['decay_rate'])
+            if self.iteration - self.config.START_ITERS > 1:
+                for _ in range(self.iteration - self.config.START_ITERS):
+                    self.g_scheduler.step()
+                    self.d_scheduler.step()
+                    self.str_scheduler.step()
+        else:
+            self.g_scheduler = None
+            self.d_scheduler = None
+            self.str_scheduler = None
+
+    def load_rezero(self):
+        if os.path.exists(self.config.gen_weights_path0):
+            print('Loading %s generator...' % self.name)
+            data = torch.load(self.config.gen_weights_path0, map_location='cpu')
+            torch_init_model(self.generator, data, 'generator', rank=self.global_rank)
+            self.gen_optimizer.load_state_dict(data['optimizer'])
+            self.iteration = data['iteration']
+        else:
+            print('Warnning: There is no previous optimizer found. An initialized optimizer will be used.')
+
+        # load discriminator only when training
+        if (self.config.MODE == 1 or self.config.score) and os.path.exists(self.config.dis_weights_path0):
+            print('Loading %s discriminator...' % self.name)
+            data = torch.load(self.config.dis_weights_path0, map_location='cpu')
+            torch_init_model(self.discriminator, data, 'discriminator', rank=self.global_rank)
+            self.dis_optimizer.load_state_dict(data['optimizer'])
+        else:
+            print('Warnning: There is no previous optimizer found. An initialized optimizer will be used.')
+
+    def load(self):
+        if self.test:
+            self.gen_weights_path = os.path.join(self.config.PATH, self.name + '_best_gen.pth')
+            print('Loading %s generator...' % self.name)
+            data = torch.load(self.gen_weights_path, map_location='cpu')
+            self.generator.load_state_dict(data['generator'])
+            self.str_encoder.load_state_dict(data['str_encoder'])
+        if not self.test and os.path.exists(self.gen_weights_path):
+            print('Loading %s generator...' % self.name)
+            data = torch.load(self.gen_weights_path, map_location='cpu')
+            self.generator.load_state_dict(data['generator'])
+            self.str_encoder.load_state_dict(data['str_encoder'])
+            self.gen_optimizer.load_state_dict(data['optimizer'])
+            self.str_optimizer.load_state_dict(data['str_opt'])
+            self.iteration = data['iteration']
+            if self.iteration > 0:
+                gen_weights_path = os.path.join(self.config.PATH, self.name + '_best_gen_HR.pth')
+                data = torch.load(gen_weights_path, map_location='cpu')
+                self.best = data['best_vfid']
+                print('Loading best vfid...')
+
+        else:
+            print('Warnning: There is no previous optimizer found. An initialized optimizer will be used.')
+
+        # load discriminator only when training
+        if not self.test and os.path.exists(self.dis_weights_path):
+            print('Loading %s discriminator...' % self.name)
+            data = torch.load(self.dis_weights_path, map_location='cpu')
+            self.dis_optimizer.load_state_dict(data['optimizer'])
+            self.discriminator.load_state_dict(data['discriminator'])
+        else:
+            print('Warnning: There is no previous optimizer found. An initialized optimizer will be used.')
+
+    def save(self):
+        print('\nsaving %s...\n' % self.name)
+        raw_model = self.generator.module if hasattr(self.generator, "module") else self.generator
+        raw_encoder = self.str_encoder.module if hasattr(self.str_encoder, "module") else self.str_encoder
+        torch.save({
+            'iteration': self.iteration,
+            'optimizer': self.gen_optimizer.state_dict(),
+            'str_opt': self.str_optimizer.state_dict(),
+            'str_encoder': raw_encoder.state_dict(),
+            'generator': raw_model.state_dict()
+        }, self.gen_weights_path)
+        raw_model = self.discriminator.module if hasattr(self.discriminator, "module") else self.discriminator
+        torch.save({
+            'optimizer': self.dis_optimizer.state_dict(),
+            'discriminator': raw_model.state_dict()
+        }, self.dis_weights_path)
+
+    def configure_optimizers(self):
+        discriminator_params = list(self.discriminator.parameters())
+        return [
+            make_optimizer(self.generator.parameters(), **self.config.optimizers['generator']),
+            make_optimizer(discriminator_params, **self.config.optimizers['discriminator'])
+        ]
 
 
 # main
