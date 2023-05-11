@@ -205,52 +205,52 @@ def calculate_fid_given_paths(paths, batch_size, cuda, dims):
 
 
 def get_inpainting_metrics(src, tgt, logger, fid_test=True):
-    input_paths = sorted(glob(src + '/*'), key=lambda x: x.split('/')[-1])
-    output_paths = sorted(glob(tgt + '/*'), key=lambda x: x.split('/')[-1])
+    input_paths = sorted(glob(src + '/*'), key=lambda x: x.split('/')[-1]) # input -> ground truth
+    output_paths = sorted(glob(tgt + '/*'), key=lambda x: x.split('/')[-1]) # output -> inpainted
 
-    assert len(input_paths) == len(output_paths), (len(input_paths), len(output_paths))
+    assert len(input_paths) == len(output_paths), (len(input_paths), len(output_paths)) # make sure the number of images is the same
 
     # PSNR and SSIM
     psnrs = []
     ssims = []
     maes = []
     mses = []
-    max_value = 1.0
-    for p1, p2 in tqdm(zip(input_paths, output_paths)):
-        img1 = cv2.imread(p1)
+    max_value = 1.0 # 255.0
+    for p1, p2 in tqdm(zip(input_paths, output_paths)): # p1: input, p2: output
+        img1 = cv2.imread(p1) # GT
         if img1 is None:
             print(p1, 'is bad image!')
-        img2 = cv2.imread(p2)
+        img2 = cv2.imread(p2) # inpainted
         if img2 is None:
             print(p2, 'is bad image!')
 
-        mse_ = np.mean((img1 / 255.0 - img2 / 255.0) ** 2)
-        mae_ = np.mean(abs(img1 / 255.0 - img2 / 255.0))
-        psnr_ = max_value - 10 * np.log(mse_ + 1e-7) / np.log(10)
-        ssim_ = compare_ssim(rgb2gray(img1), rgb2gray(img2))
+        mse_ = np.mean((img1 / 255.0 - img2 / 255.0) ** 2) # MSE
+        mae_ = np.mean(abs(img1 / 255.0 - img2 / 255.0)) # MAE
+        psnr_ = max_value - 10 * np.log(mse_ + 1e-7) / np.log(10) # PSNR
+        ssim_ = compare_ssim(rgb2gray(img1), rgb2gray(img2)) # SSIM
         psnrs.append(psnr_)
         ssims.append(ssim_)
         mses.append(mse_)
         maes.append(mae_)
 
-    psnr = np.mean(psnrs)
-    ssim = np.mean(ssims)
-    mse = np.mean(mses)
-    mae = np.mean(maes)
+    psnr = np.mean(psnrs) # mean PSNR
+    ssim = np.mean(ssims) # mean SSIM
+    mse = np.mean(mses) # mean MSE
+    mae = np.mean(maes) # mean MAE
 
-    loss_fn_alex = lpips.LPIPS(net='alex').cuda()
+    loss_fn_alex = lpips.LPIPS(net='alex').cuda() # LPIPS
 
     with torch.no_grad():
-        ds = []
-        for im1, im2 in tqdm(zip(input_paths, output_paths)):
-            img1 = lpips.im2tensor(lpips.load_image(im1)).cuda()
-            img2 = lpips.im2tensor(lpips.load_image(im2)).cuda()
-            img2 = torch.nn.functional.interpolate(img2, size=(img1.shape[2], img1.shape[3]), mode='area')
-            d = loss_fn_alex(img1, img2)
-            ds.append(d)
+        ds = [] # LPIPS
+        for im1, im2 in tqdm(zip(input_paths, output_paths)): # p1: input, p2: output
+            img1 = lpips.im2tensor(lpips.load_image(im1)).cuda() # GT
+            img2 = lpips.im2tensor(lpips.load_image(im2)).cuda() # inpainted
+            img2 = torch.nn.functional.interpolate(img2, size=(img1.shape[2], img1.shape[3]), mode='area') # resize
+            d = loss_fn_alex(img1, img2) # LPIPS
+            ds.append(d) # LPIPS
 
-        ds = torch.stack(ds)
-        ds = torch.mean(ds)
+        ds = torch.stack(ds) # LPIPS
+        ds = torch.mean(ds) # LPIPS
 
     # FID
     if fid_test:
@@ -281,11 +281,11 @@ def get_inpainting_metrics(src, tgt, logger, fid_test=True):
 
 
 if __name__ == "__main__":
-    tgt = 'GT'
-    src1 = 'results'
+    tgt = 'GT' # ground truth
+    src1 = 'results' # inpainted results
 
-    one = get_inpainting_metrics(src1, tgt, None, fid_test=True)
+    one = get_inpainting_metrics(src1, tgt, None, fid_test=True) # fid_test=True
 
-    print('\nMean PSNR:{0:.3f},Mean SSIM:{1:.3f},Mean FID:{2:.3f}\n'.format(one['psnr'], one['ssim'], one['fid']))
+    print('\nMean PSNR:{0:.3f},Mean SSIM:{1:.3f},Mean FID:{2:.3f}\n'.format(one['psnr'], one['ssim'], one['fid'])) # fid_test=True
 
 
