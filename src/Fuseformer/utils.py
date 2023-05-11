@@ -53,19 +53,26 @@ class Stack(object):
         self.roll = roll
 
     def __call__(self, img_group):
-        mode = img_group[0].mode
-        if mode == '1':
-            img_group = [img.convert('L') for img in img_group]
-            mode = 'L'
-        if mode == 'L':
-            return np.stack([np.expand_dims(x, 2) for x in img_group], axis=2)
-        elif mode == 'RGB':
-            if self.roll:
-                return np.stack([np.array(x)[:, :, ::-1] for x in img_group], axis=2)
+        if isinstance(img_group[0], np.ndarray):
+            if self.roll and img_group[0].shape[-1] == 3:
+                return np.stack([x[:, :, ::-1] for x in img_group], axis=2)
             else:
                 return np.stack(img_group, axis=2)
         else:
-            raise NotImplementedError(f"Image mode {mode}")
+            mode = img_group[0].mode
+            if mode == '1':
+                img_group = [img.convert('L') for img in img_group]
+                mode = 'L'
+            if mode == 'L':
+                return np.stack([np.expand_dims(x, 2) for x in img_group], axis=2)
+            elif mode == 'RGB':
+                if self.roll:
+                    return np.stack([np.array(x)[:, :, ::-1] for x in img_group], axis=2)
+                else:
+                    return np.stack([np.array(x) for x in img_group], axis=2)
+            else:
+                raise NotImplementedError(f"Image mode {mode}")
+
 
 
 class ToTorchFormatTensor(object):
