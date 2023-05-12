@@ -321,13 +321,23 @@ class DynamicDataset_video(torch.utils.data.Dataset):
         for m in masks:
             # transfrom mask to numpy array
             rel_pos, abs_pos, direct = self.load_masked_position_encoding(np.array(m))
+            # transfer tensor [4, 256, 256] to [4, 1, 1, 256, 256]
+            rel_pos = torch.from_numpy(rel_pos).unsqueeze(0)
+            abs_pos = torch.from_numpy(abs_pos).unsqueeze(0)
+            direct = torch.from_numpy(direct).unsqueeze(0)
+
             rel_pos_list.append(rel_pos)
             abs_pos_list.append(abs_pos)
             direct_list.append(direct)
-        
-        batch['rel_pos'] = self._to_long_tensors(rel_pos_list) 
-        batch['abs_pos'] = self._to_long_tensors(abs_pos_list) 
-        batch['direct'] = self._to_long_tensors(direct_list)
+
+        # concat rel_pos, abs_pos, direct individually in dimention 1
+        rel_pos_list = torch.cat(rel_pos_list, dim=0)
+        abs_pos_list = torch.cat(abs_pos_list, dim=0)
+        direct_list = torch.cat(direct_list, dim=0)
+
+        batch['rel_pos'] = rel_pos_list.clone().detach().to(torch.long)
+        batch['abs_pos'] = abs_pos_list.clone().detach().to(torch.long)
+        batch['direct'] = direct_list.clone().detach().to(torch.long)
 
         return batch
 
@@ -579,6 +589,139 @@ class BaseInpaintingTrainingModule_video(nn.Module):
         ]
 
 
+class DefaultInpaintingTrainingModule(BaseInpaintingTrainingModule_video):
+    def __init__(self, *args, gpu, rank, image_to_discriminator='predicted_image', test=False, **kwargs):
+        super().__init__(*args, gpu=gpu, name='InpaintingModel', rank=rank, test=test, **kwargs)
+        self.image_to_discriminator = image_to_discriminator
+        if self.config.AMP:  # use AMP
+            self.scaler = torch.cuda.amp.GradScaler()
+
+    def forward(self, batch):
+        img = batch['image'] # [B, 3, H, W] -> [B, T, 3, H, W] for video
+        mask = batch['mask'] # [B, 1, H, W] -> [B, T, 1, H, W] for video
+        masked_img = img * (1 - mask) + mask # [B, T, 3, H, W] for video
+
+        masked_img = torch.cat([masked_img, mask], dim=2) # [B, T, 4, H, W] for video
+        masked_str = torch.cat([batch['edge'], batch['line'], mask], dim=2) # [B, T, 3, H, W] for video 
+        if self.config.rezero_for_mpe is not None and self.config.rezero_for_mpe: # rezero for mpe
+            str_feats, rel_pos_emb, direct_emb = self.str_encoder(masked_str, batch['rel_pos'], batch['direct']) # structure encoder for masked str(line/edge) and relative, direct position
+            batch['predicted_image'] = self.generator(masked_img.to(torch.float32), rel_pos_emb, direct_emb, str_feats) # [B, T, 3, H, W] for video from the inpainting model
+        else:
+            str_feats = self.str_encoder(masked_str)  # not using masked positional encoding, so just use structure encoder for masked str(line/edge)
+            batch['predicted_image'] = self.generator(masked_img.to(torch.float32), batch['rel_pos'],
+                                                      batch['direct'], str_feats)
+        batch['inpainted'] = mask * batch['predicted_image'] + (1 - mask) * batch['image']
+        batch['mask_for_losses'] = mask
+        return batch
+
+    def process(self, batch):
+        self.iteration += 1
+        self.discriminator.zero_grad()
+        # discriminator loss
+        dis_loss, batch, dis_metric = self.discriminator_loss(batch)
+        self.dis_optimizer.step()
+        if self.d_scheduler is not None:
+            self.d_scheduler.step()
+
+        # generator loss
+        self.generator.zero_grad()
+        self.str_optimizer.zero_grad()
+        # generator loss
+        gen_loss, gen_metric = self.generator_loss(batch)
+
+        if self.config.AMP:
+            self.scaler.step(self.gen_optimizer)
+            self.scaler.update()
+            self.scaler.step(self.str_optimizer)
+            self.scaler.update()
+        else:
+            self.gen_optimizer.step()
+            self.str_optimizer.step()
+
+        if self.str_scheduler is not None:
+            self.str_scheduler.step()
+        if self.g_scheduler is not None:
+            self.g_scheduler.step()
+
+        # create logs
+        if self.config.AMP:
+            gen_metric['loss_scale'] = self.scaler.get_scale()
+        logs = [dis_metric, gen_metric]
+
+        return batch['predicted_image'], gen_loss, dis_loss, logs, batch
+
+    def generator_loss(self, batch):
+        img = batch['image']
+        predicted_img = batch[self.image_to_discriminator]
+        original_mask = batch['mask']
+        supervised_mask = batch['mask_for_losses']
+
+        # L1
+        l1_value = masked_l1_loss(predicted_img, img, supervised_mask,
+                                  self.config.losses['l1']['weight_known'],
+                                  self.config.losses['l1']['weight_missing'])
+
+        total_loss = l1_value
+        metrics = dict(gen_l1=l1_value.item())
+
+        # discriminator
+        # adversarial_loss calls backward by itself
+        mask_for_discr = original_mask
+        self.adversarial_loss.pre_generator_step(real_batch=img, fake_batch=predicted_img,
+                                                 generator=self.generator, discriminator=self.discriminator)
+        discr_fake_pred, discr_fake_features = self.discriminator(predicted_img.to(torch.float32))
+        adv_gen_loss, adv_metrics = self.adversarial_loss.generator_loss(discr_fake_pred=discr_fake_pred,
+                                                                         mask=mask_for_discr)
+        total_loss = total_loss + adv_gen_loss
+        metrics['gen_adv'] = adv_gen_loss.item()
+        metrics.update(add_prefix_to_keys(adv_metrics, 'adv_'))
+        # feature matching
+        if self.config.losses['feature_matching']['weight'] > 0:
+            discr_real_pred, discr_real_features = self.discriminator(img)
+            need_mask_in_fm = self.config.losses['feature_matching'].get('pass_mask', False)
+            mask_for_fm = supervised_mask if need_mask_in_fm else None
+            fm_value = feature_matching_loss(discr_fake_features, discr_real_features,
+                                             mask=mask_for_fm) * self.config.losses['feature_matching']['weight']
+            total_loss = total_loss + fm_value
+            metrics['gen_fm'] = fm_value.item()
+
+        if self.loss_resnet_pl is not None:
+            resnet_pl_value = self.loss_resnet_pl(predicted_img, img)
+            total_loss = total_loss + resnet_pl_value
+            metrics['gen_resnet_pl'] = resnet_pl_value.item()
+
+        if self.config.AMP:
+            self.scaler.scale(total_loss).backward()
+        else:
+            total_loss.backward()
+        return total_loss.item(), metrics
+
+    def discriminator_loss(self, batch):
+        self.adversarial_loss.pre_discriminator_step(real_batch=batch['image'], fake_batch=None,
+                                                     generator=self.generator, discriminator=self.discriminator)
+        discr_real_pred, discr_real_features = self.discriminator(batch['image'])
+        real_loss, dis_real_loss, grad_penalty = self.adversarial_loss.discriminator_real_loss(
+            real_batch=batch['image'],
+            discr_real_pred=discr_real_pred)
+        real_loss.backward()
+        if self.config.AMP:
+            with torch.cuda.amp.autocast():
+                batch = self.forward(batch)
+        else:
+            batch = self(batch)
+        batch[self.image_to_discriminator] = batch[self.image_to_discriminator].to(torch.float32)
+        predicted_img = batch[self.image_to_discriminator].detach()
+        discr_fake_pred, discr_fake_features = self.discriminator(predicted_img.to(torch.float32))
+        fake_loss = self.adversarial_loss.discriminator_fake_loss(discr_fake_pred=discr_fake_pred, mask=batch['mask'])
+        fake_loss.backward()
+        total_loss = fake_loss + real_loss
+        metrics = {}
+        metrics['dis_real_loss'] = dis_real_loss.mean().item()
+        metrics['dis_fake_loss'] = fake_loss.item()
+        metrics['grad_penalty'] = grad_penalty.mean().item()
+
+        return total_loss.item(), batch, metrics
+
 # main
 if __name__ == '__main__':
     split = 'train'
@@ -609,24 +752,29 @@ if __name__ == '__main__':
         abs_pos = batch['abs_pos']
         direct = batch['direct']
         # turn image to numpy array
-        # from torchvision.utils import make_grid, save_image
-        # combined = torch.cat(tuple(image), dim=2)
-        # combined_mask = torch.cat(tuple(mask), dim=2)
-        # combined_edge = torch.cat(tuple(edge), dim=2)
-        # combined_line = torch.cat(tuple(line), dim=2)
+        from torchvision.utils import make_grid, save_image
+        combined = torch.cat(tuple(image), dim=2)
+        combined_mask = torch.cat(tuple(mask), dim=2)
+        combined_edge = torch.cat(tuple(edge), dim=2)
+        combined_line = torch.cat(tuple(line), dim=2)
+        rel_pos.unsqueeze_(dim=2)  # add one dimension to the tensor
+        abs_pos.unsqueeze_(dim=2)
+        combined_rel = torch.cat(tuple(rel_pos), dim=2)
+        combined_abs = torch.cat(tuple(abs_pos), dim=2)
+        # rel_pos is torch.Size([4, 5, 256, 256]) image combined them with 4 rows and 5 columns
         # combined_rel = torch.cat(rel_pos.unbind(dim=2), dim=1)  # unbind along the third dimension (dim=2), then concatenate along the second dimension (dim=1)
         # combined_abs = torch.cat(abs_pos.unbind(dim=2), dim=1)
         
-        # save_image(combined, f'combined_image_{i}.png')
-        # save_image(combined_mask, f'combined_mask_{i}.png')
-        # save_image(combined_edge, f'combined_edge_{i}.png')
-        # save_image(combined_line, f'combined_line_{i}.png')
-        # combined_rel = combined_rel.float()  # Convert to float tensor
-        # combined_rel = (combined_rel - combined_rel.min()) / (combined_rel.max() - combined_rel.min())  # Normalize to [0, 1]
-        # save_image(combined_rel, f'combined_rel_{i}.png')
-        # combined_abs = combined_abs.float()  # Convert to float tensor
-        # combined_abs = (combined_abs - combined_abs.min()) / (combined_abs.max() - combined_abs.min())  # Normalize to [0, 1]
-        # save_image(combined_abs, f'combined_abs_{i}.png')
+        save_image(combined, f'combined_image_{i}.png')
+        save_image(combined_mask, f'combined_mask_{i}.png')
+        save_image(combined_edge, f'combined_edge_{i}.png')
+        save_image(combined_line, f'combined_line_{i}.png')
+        combined_rel = combined_rel.float()  # Convert to float tensor
+        combined_rel = (combined_rel - combined_rel.min()) / (combined_rel.max() - combined_rel.min())  # Normalize to [0, 1]
+        save_image(combined_rel, f'combined_rel_{i}.png')
+        combined_abs = combined_abs.float()  # Convert to float tensor
+        combined_abs = (combined_abs - combined_abs.min()) / (combined_abs.max() - combined_abs.min())  # Normalize to [0, 1]
+        save_image(combined_abs, f'combined_abs_{i}.png')
         
         # # Let's assume tensor is your 4D tensor with shape [256, 256, 5, 4]
         # direct = direct.permute(2, 3, 0, 1)  # Change the shape to [5, 4, 256, 256]

@@ -296,6 +296,108 @@ class StructureEncoder(nn.Module):
 
             return return_feats, rel_pos_emb, direct_emb
 
+class StructureEncoder_video(nn.Module):
+    def __init__(self, config):
+        super().__init__()
+        if config.rezero_for_mpe is None:
+            self.rezero_for_mpe = False
+        else:
+            self.rezero_for_mpe = config.rezero_for_mpe
+
+        self.pad1 = nn.ReflectionPad2d(3)
+        self.conv1 = GateConv(in_channels=3, out_channels=64, kernel_size=7, stride=1, padding=0)
+        self.bn1 = nn.BatchNorm2d(64)
+        self.act = nn.ReLU(True)
+
+        self.conv2 = GateConv(in_channels=64, out_channels=128, kernel_size=4, stride=2, padding=1)
+        self.bn2 = nn.BatchNorm2d(128)
+
+        self.conv3 = nn.Conv2d(in_channels=128, out_channels=256, kernel_size=4, stride=2, padding=1)
+        self.bn3 = nn.BatchNorm2d(256)
+
+        self.conv4 = nn.Conv2d(in_channels=256, out_channels=512, kernel_size=4, stride=2, padding=1)
+        self.bn4 = nn.BatchNorm2d(512)
+
+        blocks = []
+        # resnet blocks
+        for i in range(3):
+            blocks.append(ResnetBlock(input_dim=512, out_dim=None, dilation=2))
+
+        self.middle = nn.Sequential(*blocks)
+        self.alpha1 = nn.Parameter(torch.tensor(0, dtype=torch.float32), requires_grad=True)
+
+        self.convt1 = GateConv(512, 256, kernel_size=4, stride=2, padding=1, transpose=True)
+        self.bnt1 = nn.BatchNorm2d(256)
+        self.alpha2 = nn.Parameter(torch.tensor(0, dtype=torch.float32), requires_grad=True)
+
+        self.convt2 = GateConv(256, 128, kernel_size=4, stride=2, padding=1, transpose=True)
+        self.bnt2 = nn.BatchNorm2d(128)
+        self.alpha3 = nn.Parameter(torch.tensor(0, dtype=torch.float32), requires_grad=True)
+
+        self.convt3 = GateConv(128, 64, kernel_size=4, stride=2, padding=1, transpose=True)
+        self.bnt3 = nn.BatchNorm2d(64)
+        self.alpha4 = nn.Parameter(torch.tensor(0, dtype=torch.float32), requires_grad=True)
+
+        if self.rezero_for_mpe:
+            self.rel_pos_emb = MaskedSinusoidalPositionalEmbedding(num_embeddings=config.rel_pos_num,
+                                                                   embedding_dim=64)
+            self.direct_emb = MultiLabelEmbedding(num_positions=4, embedding_dim=64)
+            self.alpha5 = nn.Parameter(torch.tensor(0, dtype=torch.float32), requires_grad=True)
+            self.alpha6 = nn.Parameter(torch.tensor(0, dtype=torch.float32), requires_grad=True)
+
+    def forward(self, x, rel_pos=None, direct=None):
+        b, t, c, h, w = x.shape
+        x = x.view(b*t, c, h, w)
+        x = self.pad1(x)
+        x = self.conv1(x)
+        x = self.bn1(x.to(torch.float32))
+        x = self.act(x)
+
+        x = self.conv2(x)
+        x = self.bn2(x.to(torch.float32))
+        x = self.act(x)
+
+        x = self.conv3(x)
+        x = self.bn3(x.to(torch.float32))
+        x = self.act(x)
+
+        x = self.conv4(x)
+        x = self.bn4(x.to(torch.float32))
+        x = self.act(x)
+
+        return_feats = []
+        x = self.middle(x)
+        return_feats.append(x * self.alpha1)
+
+        x = self.convt1(x)
+        x = self.bnt1(x.to(torch.float32))
+        x = self.act(x)
+        return_feats.append(x * self.alpha2)
+
+        x = self.convt2(x)
+        x = self.bnt2(x.to(torch.float32))
+        x = self.act(x)
+        return_feats.append(x * self.alpha3)
+
+        x = self.convt3(x)
+        x = self.bnt3(x.to(torch.float32))
+        x = self.act(x)
+        return_feats.append(x * self.alpha4)
+
+        return_feats = return_feats[::-1]
+        return_feats = [feat.view(b, t, *feat.shape[1:]) for feat in return_feats]
+
+        if not self.rezero_for_mpe:
+            return return_feats
+        else:
+            b, t, h, w = rel_pos.shape
+            rel_pos = rel_pos.reshape(b*t, h*w)
+            rel_pos_emb = self.rel_pos_emb(rel_pos).reshape(b, t, h, w, -1).permute(0, 1, 3, 2, 4) * self.alpha5
+            direct = direct.reshape(b*t, h*w, 4).to(torch.float32)
+            direct_emb = self.direct_emb(direct).reshape(b, t, h, w, -1).permute(0, 1, 3, 2, 4) * self.alpha6
+
+            return return_feats,
+
 
 class NLayerDiscriminator(nn.Module):
     def __init__(self, input_nc):
