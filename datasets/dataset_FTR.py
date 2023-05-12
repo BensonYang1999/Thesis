@@ -754,13 +754,23 @@ class DynamicDataset_video(torch.utils.data.Dataset):
         for m in masks:
             # transfrom mask to numpy array
             rel_pos, abs_pos, direct = self.load_masked_position_encoding(np.array(m))
+            # transfer tensor [4, 256, 256] to [4, 1, 1, 256, 256]
+            rel_pos = torch.from_numpy(rel_pos).unsqueeze(0).unsqueeze(0)
+            abs_pos = torch.from_numpy(abs_pos).unsqueeze(0).unsqueeze(0)
+            direct = torch.from_numpy(direct).unsqueeze(0).unsqueeze(0)
+
             rel_pos_list.append(rel_pos)
             abs_pos_list.append(abs_pos)
             direct_list.append(direct)
-        
-        batch['rel_pos'] = self._to_long_tensors(rel_pos_list) 
-        batch['abs_pos'] = self._to_long_tensors(abs_pos_list) 
-        batch['direct'] = self._to_long_tensors(direct_list)
+
+        # concat rel_pos, abs_pos, direct individually in dimention 1
+        rel_pos_list = torch.cat(rel_pos_list, dim=0)
+        abs_pos_list = torch.cat(abs_pos_list, dim=0)
+        direct_list = torch.cat(direct_list, dim=0)
+
+        batch['rel_pos'] = torch.tensor(rel_pos_list, dtype=torch.long)
+        batch['abs_pos'] = torch.tensor(abs_pos_list, dtype=torch.long)
+        batch['direct'] = torch.tensor(direct_list, dtype=torch.long)
 
         return batch
 
