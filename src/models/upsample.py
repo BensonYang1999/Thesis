@@ -25,3 +25,28 @@ class StructureUpsampling(nn.Module):
         x2 = self.out(x)
 
         return x, x2
+
+    
+class StructureUpsampling_video(nn.Module):
+    def __init__(self):
+        super().__init__()
+
+        self.convs = nn.Sequential(nn.ReplicationPad3d((3, 3, 3)),
+                                   nn.Conv3d(1, 64, kernel_size=(7, 7, 7), stride=1, padding=0),
+                                   nn.ReLU(inplace=True),
+                                   nn.Conv3d(64, 64, kernel_size=(3, 3, 3), stride=1, padding=1),
+                                   nn.ReLU(inplace=True),
+                                   nn.Conv3d(64, 64, kernel_size=(3, 3, 3), stride=1, padding=1),
+                                   nn.ReLU(inplace=True),
+                                   nn.Conv3d(64, 1, kernel_size=(3, 3, 3), stride=1, padding=1))
+        self.out = nn.Sequential(nn.Conv3d(1, 32, kernel_size=(4, 4, 4), stride=2, padding=1),
+                                 nn.ReLU(inplace=True),
+                                 nn.Conv3d(32, 1, kernel_size=(3, 3, 3), stride=1, padding=1))
+
+    def forward(self, line):
+        x = line
+        x = F.interpolate(x, scale_factor=2, mode='trilinear', align_corners=False)
+        x = self.convs(x)
+        x2 = self.out(x)
+
+        return x, x2

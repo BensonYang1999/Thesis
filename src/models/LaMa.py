@@ -148,6 +148,161 @@ class LaMa_model(nn.Module):
         x = (x + 1) / 2
         return x
 
+class LaMa_model_video_2D(nn.Module):
+    def __init__(self):
+        super().__init__()
+
+        self.pad1 = nn.ReflectionPad2d(3)
+        self.conv1 = nn.Conv2d(in_channels=4, out_channels=64, kernel_size=7, padding=0)
+        self.bn1 = nn.BatchNorm2d(64)
+        self.act = nn.ReLU(True)
+
+        self.conv2 = nn.Conv2d(in_channels=64, out_channels=128, kernel_size=3, stride=2, padding=1)
+        self.bn2 = nn.BatchNorm2d(128)
+
+        self.conv3 = nn.Conv2d(in_channels=128, out_channels=256, kernel_size=3, stride=2, padding=1)
+        self.bn3 = nn.BatchNorm2d(256)
+
+        self.conv4 = nn.Conv2d(in_channels=256, out_channels=512, kernel_size=3, stride=2, padding=1)
+        self.bn4 = nn.BatchNorm2d(512)
+
+        blocks = []
+        ### resnet blocks
+        for i in range(9):
+            cur_resblock = ResnetBlock_remove_IN(512, 1)
+            blocks.append(cur_resblock)
+
+        self.middle = nn.Sequential(*blocks)
+
+        self.convt1 = nn.ConvTranspose2d(512, 256, kernel_size=3, stride=2, padding=1, output_padding=1)
+        self.bnt1 = nn.BatchNorm2d(256)
+
+        self.convt2 = nn.ConvTranspose2d(256, 128, kernel_size=3, stride=2, padding=1, output_padding=1)
+        self.bnt2 = nn.BatchNorm2d(128)
+
+        self.convt3 = nn.ConvTranspose2d(128, 64, kernel_size=3, stride=2, padding=1, output_padding=1)
+        self.bnt3 = nn.BatchNorm2d(64)
+
+        self.padt = nn.ReflectionPad2d(3)
+        self.convt4 = nn.Conv2d(in_channels=64, out_channels=3, kernel_size=7, padding=0)
+        self.act_last = nn.Tanh()
+
+    def forward(self, x, rel_pos_emb=None, direct_emb=None, str_feats=None):
+        b, t, c, h, w = x.shape
+        x = x.view(b*t, c, h, w)
+        x = self.pad1(x)
+        x = self.conv1(x)
+        x = self.bn1(x.to(torch.float32))
+        x = self.act(x)
+
+        x = self.conv2(x)
+        x = self.bn2(x.to(torch.float32))
+        x = self.act(x)
+
+        x = self.conv3(x)
+        x = self.bn3(x.to(torch.float32))
+        x = self.act(x)
+
+        x = self.conv4(x)
+        x = self.bn4(x.to(torch.float32))
+        x = self.act(x)
+
+        x = self.middle(x)
+
+        x = self.convt1(x)
+        x = self.bnt1(x.to(torch.float32))
+        x = self.act(x)
+
+        x = self.convt2(x)
+        x = self.bnt2(x.to(torch.float32))
+        x = self.act(x)
+
+        x = self.convt3(x)
+        x = self.bnt3(x.to(torch.float32))
+        x = self.act(x)
+
+        x = self.padt(x)
+        x = self.convt4(x)
+        x = self.act_last(x)
+        x = (x + 1) / 2
+        return x
+
+class LaMa_model_video_3D(nn.Module):
+    def __init__(self):
+        super().__init__()
+
+        self.pad1 = nn.ReplicationPad3d(3)
+        self.conv1 = nn.Conv3d(in_channels=4, out_channels=64, kernel_size=7, padding=0)
+        self.bn1 = nn.BatchNorm3d(64)
+        self.act = nn.ReLU(True)
+
+        self.conv2 = nn.Conv3d(in_channels=64, out_channels=128, kernel_size=3, stride=2, padding=1)
+        self.bn2 = nn.BatchNorm3d(128)
+
+        self.conv3 = nn.Conv3d(in_channels=128, out_channels=256, kernel_size=3, stride=2, padding=1)
+        self.bn3 = nn.BatchNorm3d(256)
+
+        self.conv4 = nn.Conv3d(in_channels=256, out_channels=512, kernel_size=3, stride=2, padding=1)
+        self.bn4 = nn.BatchNorm3d(512)
+
+        blocks = []
+        ### resnet blocks
+        for i in range(9):
+            cur_resblock = ResnetBlock_remove_IN(512, 1)
+            blocks.append(cur_resblock)
+
+        self.middle = nn.Sequential(*blocks)
+
+        self.convt1 = nn.ConvTranspose3d(512, 256, kernel_size=3, stride=2, padding=1, output_padding=1)
+        self.bnt1 = nn.BatchNorm3d(256)
+
+        self.convt2 = nn.ConvTranspose3d(256, 128, kernel_size=3, stride=2, padding=1, output_padding=1)
+        self.bnt2 = nn.BatchNorm3d(128)
+
+        self.convt3 = nn.ConvTranspose3d(128, 64, kernel_size=3, stride=2, padding=1, output_padding=1)
+        self.bnt3 = nn.BatchNorm3d(64)
+
+        self.padt = nn.ReplicationPad3d(3)
+        self.convt4 = nn.Conv3d(in_channels=64, out_channels=3, kernel_size=7, padding=0)
+        self.act_last = nn.Tanh()
+
+    def forward(self, x, rel_pos_emb=None, direct_emb=None, str_feats=None):
+        x = self.pad1(x)
+        x = self.conv1(x)
+        x = self.bn1(x.to(torch.float32))
+        x = self.act(x)
+
+        x = self.conv2(x)
+        x = self.bn2(x.to(torch.float32))
+        x = self.act(x)
+
+        x = self.conv3(x)
+        x = self.bn3(x.to(torch.float32))
+        x = self.act(x)
+
+        x = self.conv4(x)
+        x = self.bn4(x.to(torch.float32))
+        x = self.act(x)
+
+        x = self.middle(x)
+
+        x = self.convt1(x)
+        x = self.bnt1(x.to(torch.float32))
+        x = self.act(x)
+
+        x = self.convt2(x)
+        x = self.bnt2(x.to(torch.float32))
+        x = self.act(x)
+
+        x = self.convt3(x)
+        x = self.bnt3(x.to(torch.float32))
+        x = self.act(x)
+
+        x = self.padt(x)
+        x = self.convt4(x)
+        x = self.act_last(x)
+        x = (x + 1) / 2
+        return x
 
 class ReZeroFFC(LaMa_model):
     def __init__(self, config):
@@ -177,6 +332,108 @@ class ReZeroFFC(LaMa_model):
         x = self.act(x)
 
         x = self.middle(x + str_feats[3])
+
+        x = self.convt1(x)
+        x = self.bnt1(x.to(torch.float32))
+        x = self.act(x)
+
+        x = self.convt2(x)
+        x = self.bnt2(x.to(torch.float32))
+        x = self.act(x)
+
+        x = self.convt3(x)
+        x = self.bnt3(x.to(torch.float32))
+        x = self.act(x)
+
+        x = self.padt(x)
+        x = self.convt4(x)
+        x = self.act_last(x)
+        x = (x + 1) / 2
+        return x
+
+class ReZeroFFC_video_2D(LaMa_model_video_2D):
+    def __init__(self, config):
+        super().__init__()
+        self.config = config
+
+    def forward(self, x, rel_pos_emb=None, direct_emb=None, str_feats=None):
+        b, t, c, h, w = x.shape
+        rel_pos_emb =  rel_pos_emb.reshape(b*t, -1, h, w)
+        direct_emb = direct_emb.reshape(b*t, -1, h, w) # four directions
+        str_feats = [feat.reshape(-1, *feat.shape[2:]) for feat in str_feats]
+        
+        x = x.view(b*t, c, h, w)
+        x = self.pad1(x)
+        x = self.conv1(x)
+        if self.config.use_MPE:
+            inp = x.to(torch.float32) + rel_pos_emb + direct_emb
+        else:
+            inp = x.to(torch.float32)
+        x = self.bn1(inp)
+        x = self.act(x)
+
+        x = self.conv2(x + str_feats[0])
+        x = self.bn2(x.to(torch.float32))
+        x = self.act(x)
+
+        x = self.conv3(x + str_feats[1])
+        x = self.bn3(x.to(torch.float32))
+        x = self.act(x)
+
+        x = self.conv4(x + str_feats[2])
+        x = self.bn4(x.to(torch.float32))
+        x = self.act(x)
+
+        x = self.middle(x + str_feats[3])
+
+        x = self.convt1(x)
+        x = self.bnt1(x.to(torch.float32))
+        x = self.act(x)
+
+        x = self.convt2(x)
+        x = self.bnt2(x.to(torch.float32))
+        x = self.act(x)
+
+        x = self.convt3(x)
+        x = self.bnt3(x.to(torch.float32))
+        x = self.act(x)
+
+        x = self.padt(x)
+        x = self.convt4(x)
+        x = self.act_last(x)
+        x = (x + 1) / 2
+        x = x.view(b, t, 3, h, w)
+        return x
+
+
+class ReZeroFFC_Video_3D(LaMa_model_video_3D):
+    def __init__(self, config):
+        super().__init__()
+        self.config = config
+
+    def forward(self, x, rel_pos_emb=None, direct_emb=None, str_feats=None):
+        x = self.pad1(x)
+        x = self.conv1(x)
+        if self.config.use_MPE:
+            inp = x.to(torch.float32) + rel_pos_emb.unsqueeze(2) + direct_emb.unsqueeze(2)
+        else:
+            inp = x.to(torch.float32)
+        x = self.bn1(inp)
+        x = self.act(x)
+
+        x = self.conv2(x + str_feats[0].unsqueeze(2))
+        x = self.bn2(x.to(torch.float32))
+        x = self.act(x)
+
+        x = self.conv3(x + str_feats[1].unsqueeze(2))
+        x = self.bn3(x.to(torch.float32))
+        x = self.act(x)
+
+        x = self.conv4(x + str_feats[2].unsqueeze(2))
+        x = self.bn4(x.to(torch.float32))
+        x = self.act(x)
+
+        x = self.middle(x + str_feats[3].unsqueeze(2))
 
         x = self.convt1(x)
         x = self.bnt1(x.to(torch.float32))
@@ -296,107 +553,35 @@ class StructureEncoder(nn.Module):
 
             return return_feats, rel_pos_emb, direct_emb
 
-class StructureEncoder_video(nn.Module):
+
+class StructureEncoder_video_2D(nn.Module):
     def __init__(self, config):
         super().__init__()
         if config.rezero_for_mpe is None:
             self.rezero_for_mpe = False
         else:
             self.rezero_for_mpe = config.rezero_for_mpe
-
-        self.pad1 = nn.ReflectionPad2d(3)
-        self.conv1 = GateConv(in_channels=3, out_channels=64, kernel_size=7, stride=1, padding=0)
-        self.bn1 = nn.BatchNorm2d(64)
-        self.act = nn.ReLU(True)
-
-        self.conv2 = GateConv(in_channels=64, out_channels=128, kernel_size=4, stride=2, padding=1)
-        self.bn2 = nn.BatchNorm2d(128)
-
-        self.conv3 = nn.Conv2d(in_channels=128, out_channels=256, kernel_size=4, stride=2, padding=1)
-        self.bn3 = nn.BatchNorm2d(256)
-
-        self.conv4 = nn.Conv2d(in_channels=256, out_channels=512, kernel_size=4, stride=2, padding=1)
-        self.bn4 = nn.BatchNorm2d(512)
-
-        blocks = []
-        # resnet blocks
-        for i in range(3):
-            blocks.append(ResnetBlock(input_dim=512, out_dim=None, dilation=2))
-
-        self.middle = nn.Sequential(*blocks)
-        self.alpha1 = nn.Parameter(torch.tensor(0, dtype=torch.float32), requires_grad=True)
-
-        self.convt1 = GateConv(512, 256, kernel_size=4, stride=2, padding=1, transpose=True)
-        self.bnt1 = nn.BatchNorm2d(256)
-        self.alpha2 = nn.Parameter(torch.tensor(0, dtype=torch.float32), requires_grad=True)
-
-        self.convt2 = GateConv(256, 128, kernel_size=4, stride=2, padding=1, transpose=True)
-        self.bnt2 = nn.BatchNorm2d(128)
-        self.alpha3 = nn.Parameter(torch.tensor(0, dtype=torch.float32), requires_grad=True)
-
-        self.convt3 = GateConv(128, 64, kernel_size=4, stride=2, padding=1, transpose=True)
-        self.bnt3 = nn.BatchNorm2d(64)
-        self.alpha4 = nn.Parameter(torch.tensor(0, dtype=torch.float32), requires_grad=True)
-
-        if self.rezero_for_mpe:
-            self.rel_pos_emb = MaskedSinusoidalPositionalEmbedding(num_embeddings=config.rel_pos_num,
-                                                                   embedding_dim=64)
-            self.direct_emb = MultiLabelEmbedding(num_positions=4, embedding_dim=64)
-            self.alpha5 = nn.Parameter(torch.tensor(0, dtype=torch.float32), requires_grad=True)
-            self.alpha6 = nn.Parameter(torch.tensor(0, dtype=torch.float32), requires_grad=True)
+        self.struc_encoder = StructureEncoder(config)
 
     def forward(self, x, rel_pos=None, direct=None):
         b, t, c, h, w = x.shape
-        x = x.view(b*t, c, h, w)
-        x = self.pad1(x)
-        x = self.conv1(x)
-        x = self.bn1(x.to(torch.float32))
-        x = self.act(x)
-
-        x = self.conv2(x)
-        x = self.bn2(x.to(torch.float32))
-        x = self.act(x)
-
-        x = self.conv3(x)
-        x = self.bn3(x.to(torch.float32))
-        x = self.act(x)
-
-        x = self.conv4(x)
-        x = self.bn4(x.to(torch.float32))
-        x = self.act(x)
-
-        return_feats = []
-        x = self.middle(x)
-        return_feats.append(x * self.alpha1)
-
-        x = self.convt1(x)
-        x = self.bnt1(x.to(torch.float32))
-        x = self.act(x)
-        return_feats.append(x * self.alpha2)
-
-        x = self.convt2(x)
-        x = self.bnt2(x.to(torch.float32))
-        x = self.act(x)
-        return_feats.append(x * self.alpha3)
-
-        x = self.convt3(x)
-        x = self.bnt3(x.to(torch.float32))
-        x = self.act(x)
-        return_feats.append(x * self.alpha4)
-
-        return_feats = return_feats[::-1]
-        return_feats = [feat.view(b, t, *feat.shape[1:]) for feat in return_feats]
-
+        return_feats_t = []
+        rel_pos_emb_t = []
+        direct_emb_t  = []
+        for i in range(t):
+            return_feats, rel_pos_emb, direct_emb = self.struc_encoder(x[:, i], rel_pos[:, i].squeeze(1), direct[:, i])
+            # return list with len 4 refer to four different scales of structure embedding
+            
+            return_feats_t.append(return_feats) # for the time
+            rel_pos_emb_t.append(rel_pos_emb)
+            direct_emb_t.append(direct_emb)
+            
+        return_feats_t = [torch.stack([return_feats_t[j][i] for j in range(t)], dim=1) for i in range(4)]
+        
         if not self.rezero_for_mpe:
-            return return_feats
+            return return_feats_t
         else:
-            b, t, h, w = rel_pos.shape
-            rel_pos = rel_pos.reshape(b*t, h*w)
-            rel_pos_emb = self.rel_pos_emb(rel_pos).reshape(b, t, h, w, -1).permute(0, 1, 3, 2, 4) * self.alpha5
-            direct = direct.reshape(b*t, h*w, 4).to(torch.float32)
-            direct_emb = self.direct_emb(direct).reshape(b, t, h, w, -1).permute(0, 1, 3, 2, 4) * self.alpha6
-
-            return return_feats,
+            return return_feats_t, torch.stack(rel_pos_emb_t).permute(1,0,2,3,4), torch.stack(direct_emb_t).permute(1,0,2,3,4)
 
 
 class NLayerDiscriminator(nn.Module):
@@ -424,6 +609,58 @@ class NLayerDiscriminator(nn.Module):
         self.bn5 = nn.BatchNorm2d(512)
 
         self.conv6 = nn.Conv2d(512, 1, kernel_size=kw, stride=1, padding=padw)
+
+    def forward(self, x):
+        conv1 = self.conv1(x)
+
+        conv2 = self.conv2(conv1)
+        conv2 = self.bn2(conv2.to(torch.float32))
+        conv2 = self.act(conv2)
+
+        conv3 = self.conv3(conv2)
+        conv3 = self.bn3(conv3.to(torch.float32))
+        conv3 = self.act(conv3)
+
+        conv4 = self.conv4(conv3)
+        conv4 = self.bn4(conv4.to(torch.float32))
+        conv4 = self.act(conv4)
+
+        conv5 = self.conv5(conv4)
+        conv5 = self.bn5(conv5.to(torch.float32))
+        conv5 = self.act(conv5)
+
+        conv6 = self.conv6(conv5)
+
+        outputs = conv6
+
+        return outputs, [conv1, conv2, conv3, conv4, conv5]
+
+
+class NLayerDiscriminator_video(nn.Module):
+    def __init__(self, input_nc, num_frames):
+        super().__init__()
+        kw = 4
+        padw = int(np.ceil((kw - 1.0) / 2))
+
+        self.conv1 = nn.Sequential(
+            nn.Conv3d(in_channels=input_nc*num_frames, out_channels=64, kernel_size=kw, stride=2, padding=padw),
+            nn.LeakyReLU(0.2, inplace=True),
+        )
+
+        self.act = nn.LeakyReLU(0.2, inplace=True)
+        self.conv2 = nn.Conv3d(in_channels=64, out_channels=128, kernel_size=kw, stride=2, padding=padw)
+        self.bn2 = nn.BatchNorm3d(128)
+
+        self.conv3 = nn.Conv3d(in_channels=128, out_channels=256, kernel_size=kw, stride=2, padding=padw)
+        self.bn3 = nn.BatchNorm3d(256)
+
+        self.conv4 = nn.Conv3d(in_channels=256, out_channels=512, kernel_size=kw, stride=2, padding=padw)
+        self.bn4 = nn.BatchNorm3d(512)
+
+        self.conv5 = nn.Conv3d(in_channels=512, out_channels=512, kernel_size=kw, stride=1, padding=padw)
+        self.bn5 = nn.BatchNorm3d(512)
+
+        self.conv6 = nn.Conv3d(512, 1, kernel_size=kw, stride=1, padding=padw)
 
     def forward(self, x):
         conv1 = self.conv1(x)

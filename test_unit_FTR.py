@@ -55,11 +55,11 @@ def to_int(x):
 class ImgDataset_video(torch.utils.data.Dataset):
 
     # write a video version of __init__ function
-    def __init__(self, opts, sample=5, size=(432, 240), spit='train', name='YoutubeVOS', root='./datasets'):
+    def __init__(self, args, sample=5, size=(432, 240), spit='train', name='YoutubeVOS', root='./datasets'):
         self.split = split
         self.sample_length = sample
         self.input_size = self.w, self.h = size
-        self.opts = opts
+        self.args = args
         if name == 'YouTubeVOS':
             vid_lst_prefix = os.path.join(root, name, split+'_all_frames/JPEGImages')
         vid_lst = os.listdir(vid_lst_prefix)
@@ -338,6 +338,7 @@ class DynamicDataset_video(torch.utils.data.Dataset):
         batch['rel_pos'] = rel_pos_list.clone().detach().to(torch.long)
         batch['abs_pos'] = abs_pos_list.clone().detach().to(torch.long)
         batch['direct'] = direct_list.clone().detach().to(torch.long)
+        # batch['direct'] = batch['direct'].permute(0, 3, 1, 2)
 
         return batch
 
@@ -415,9 +416,33 @@ class DynamicDataset_video(torch.utils.data.Dataset):
             ref_index = [pivot+i for i in range(sample_length)]
         return ref_index
 
+from src.models.upsample import *
+from src.models.LaMa import *
+from src.losses.adversarial import *
+from src.losses.perceptual import *
+from src.utils import get_lr_schedule_with_warmup
+
+def make_optimizer(parameters, kind='adamw', **kwargs):
+    if kind == 'adam':
+        optimizer_class = torch.optim.Adam
+    elif kind == 'adamw':
+        optimizer_class = torch.optim.AdamW
+    else:
+        raise ValueError(f'Unknown optimizer kind {kind}')
+    return optimizer_class(parameters, **kwargs)
+
+
+def set_requires_grad(module, value):
+    for param in module.parameters():
+        param.requires_grad = value
+
+
+def add_prefix_to_keys(dct, prefix):
+    return {prefix + k: v for k, v in dct.items()}
+
 class BaseInpaintingTrainingModule_video(nn.Module):
-    def __init__(self, config, gpu, name, rank, *args, test=False, **kwargs):
-        super().__init__(*args, **kwargs)
+    def __init__(self, config, gpu, name, rank, args, test=False, **kwargs):
+        super().__init__()
         print('BaseInpaintingTrainingModule init called')
         self.global_rank = rank
         self.config = config
@@ -427,8 +452,8 @@ class BaseInpaintingTrainingModule_video(nn.Module):
         self.gen_weights_path = os.path.join(config.PATH, name + '_gen.pth')
         self.dis_weights_path = os.path.join(config.PATH, name + '_dis.pth')
 
-        self.str_encoder = StructureEncoder(config).cuda(gpu) # structure encoder for one image
-        self.generator = ReZeroFFC(config).cuda(gpu) # generator
+        self.str_encoder = StructureEncoder_video_2D(config).cuda(gpu) # structure encoder for one image
+        self.generator = ReZeroFFC_video_2D(config).cuda(gpu) # generator
         self.best = None
 
         print('Loading %s StructureUpsampling...' % self.name)
@@ -437,8 +462,8 @@ class BaseInpaintingTrainingModule_video(nn.Module):
         self.structure_upsample.load_state_dict(data['model'])
         self.structure_upsample = self.structure_upsample.cuda(gpu).eval()
         print("Loading trained transformer...")
-        model_config = EdgeLineGPTConfig(embd_pdrop=0.0, resid_pdrop=0.0, n_embd=opts.n_embd, block_size=32,
-                                     attn_pdrop=0.0, n_layer=opts.n_layer, n_head=opts.n_head, ref_frame_num=opts.ref_frame_num) # video version
+        model_config = EdgeLineGPTConfig(embd_pdrop=0.0, resid_pdrop=0.0, n_embd=args.n_embd, block_size=32,
+                                     attn_pdrop=0.0, n_layer=args.n_layer, n_head=args.n_head, ref_frame_num=args.ref_frame_num) # video version
         self.transformer = EdgeLineGPT256RelBCE_video(model_config, args, device=gpu)
         checkpoint = torch.load(config.transformer_ckpt_path, map_location='cpu')
         if config.transformer_ckpt_path.endswith('.pt'): 
@@ -449,11 +474,12 @@ class BaseInpaintingTrainingModule_video(nn.Module):
         self.transformer.half() # half precision
 
         if not test:
-            # self.discriminator = NLayerDiscriminator(**self.config.discriminator).cuda(gpu) 
-            self.discriminator = net.Discriminator(
-                in_channels=3, use_sigmoid=config['losses']['GAN_LOSS'] != 'hinge').cuda(gpu)  # video version referr to FuseFormer
-            # self.adversarial_loss = NonSaturatingWithR1(**self.config.losses['adversarial'])
-            self.adversarial_loss = AdversarialLoss(type=self.config['losses']['GAN_LOSS']).cuda(gpu)
+            # self.discriminator = NLayerDiscriminator_video(**self.config.discriminator).cuda(gpu) 
+            self.discriminator = NLayerDiscriminator(**self.config.discriminator).cuda(gpu) 
+            # self.discriminator = net.Discriminator(
+            #     in_channels=3, use_sigmoid=config['losses']['GAN_LOSS'] != 'hinge').cuda(gpu)  # video version referr to FuseFormer
+            self.adversarial_loss = NonSaturatingWithR1(**self.config.losses['adversarial'])
+            # self.adversarial_loss = AdversarialLoss(type=self.config['losses']['GAN_LOSS']).cuda(gpu) # video version reference to FuseFormer
             self.generator_average = None
             self.last_generator_averaging_step = -1
 
@@ -466,7 +492,7 @@ class BaseInpaintingTrainingModule_video(nn.Module):
             assert self.config.losses['perceptual']['weight'] == 0
 
             if self.config.losses.get("resnet_pl", {"weight": 0})['weight'] > 0:
-                self.loss_resnet_pl = ResNetPL(**self.config.losses['resnet_pl'])
+                self.loss_resnet_pl = ResNetPL_video(**self.config.losses['resnet_pl'])
             else:
                 self.loss_resnet_pl = None
             self.gen_optimizer, self.dis_optimizer = self.configure_optimizers()
@@ -590,8 +616,8 @@ class BaseInpaintingTrainingModule_video(nn.Module):
 
 
 class DefaultInpaintingTrainingModule_video(BaseInpaintingTrainingModule_video):
-    def __init__(self, *args, gpu, rank, video_to_discriminator='predicted_video', test=False, **kwargs):
-        super().__init__(*args, gpu=gpu, name='InpaintingModel', rank=rank, test=test, **kwargs)
+    def __init__(self, args, config, gpu, rank, video_to_discriminator='predicted_video', test=False, **kwargs):
+        super().__init__(args=args, config=config, gpu=gpu, name='InpaintingModel', rank=rank, test=test, **kwargs)
         self.video_to_discriminator = video_to_discriminator
         if self.config.AMP:  # use AMP
             self.scaler = torch.cuda.amp.GradScaler()
@@ -610,6 +636,7 @@ class DefaultInpaintingTrainingModule_video(BaseInpaintingTrainingModule_video):
             str_feats = self.str_encoder(masked_str)  # not using masked positional encoding, so just use structure encoder for masked str(line/edge)
             batch['predicted_video'] = self.generator(masked_img.to(torch.float32), batch['rel_pos'],
                                                       batch['direct'], str_feats)
+        
         batch['inpainted'] = mask * batch['predicted_video'] + (1 - mask) * batch['frames'] # [B, T, 3, H, W] for video
         batch['mask_for_losses'] = mask
         return batch
@@ -618,6 +645,7 @@ class DefaultInpaintingTrainingModule_video(BaseInpaintingTrainingModule_video):
         self.iteration += 1 # iteration for optimizer
         self.discriminator.zero_grad() # clear gradient for discriminator
         # discriminator loss
+        # print batch shape
         dis_loss, batch, dis_metric = self.discriminator_loss(batch) #  [B, T, 3, H, W] for video compute the discriminator loss
         self.dis_optimizer.step() # update discriminator
         if self.d_scheduler is not None: 
@@ -651,14 +679,14 @@ class DefaultInpaintingTrainingModule_video(BaseInpaintingTrainingModule_video):
         return batch['predicted_video'], gen_loss, dis_loss, logs, batch
 
     def generator_loss(self, batch):
-        frames = batch['video'] # Change 'image' to 'video'
+        frames = batch['frames'] # Change 'image' to 'video'
         predicted_video = batch[self.video_to_discriminator] 
         original_mask = batch['masks']
         supervised_mask = batch['mask_for_losses']
 
         for t in range(frames.shape[1]):
             # L1
-            l1_value = masked_l1_loss(predicted_video[:, t], frames[:, t], supervised_mask[:, t]
+            l1_value = masked_l1_loss(predicted_video[:, t], frames[:, t], supervised_mask[:, t],
                                     self.config.losses['l1']['weight_known'],
                                     self.config.losses['l1']['weight_missing'])
 
@@ -698,11 +726,17 @@ class DefaultInpaintingTrainingModule_video(BaseInpaintingTrainingModule_video):
         return total_loss.item(), metrics
 
     def discriminator_loss(self, batch):
-        frames = batch['video'] # Change 'image' to 'video'
+        frames = batch['frames'] # Change 'image' to 'video'
         total_loss = 0
         metrics = []
 
-        for t in range(frames.shape[1]):
+        for t in range(frames.shape[1]): # for each frame in the video
+            if self.config.AMP:
+                with torch.cuda.amp.autocast():
+                    batch = self.forward(batch)
+            else:
+                batch = self(batch)
+
             self.adversarial_loss.pre_discriminator_step(real_batch=frames[:, t], fake_batch=None,
                                                         generator=self.generator, discriminator=self.discriminator)
             discr_real_pred, discr_real_features = self.discriminator(frames[:, t])
@@ -710,11 +744,6 @@ class DefaultInpaintingTrainingModule_video(BaseInpaintingTrainingModule_video):
                 real_batch=frames[:, t],
                 discr_real_pred=discr_real_pred)
             real_loss.backward()
-            if self.config.AMP:
-                with torch.cuda.amp.autocast():
-                    batch = self.forward(batch)
-            else:
-                batch = self(batch)
             batch[self.video_to_discriminator] = batch[self.video_to_discriminator].to(torch.float32)
             predicted_frame = batch[self.video_to_discriminator].detach()
             discr_fake_pred, discr_fake_features = self.discriminator(predicted_frame[:, t].to(torch.float32))
@@ -728,87 +757,159 @@ class DefaultInpaintingTrainingModule_video(BaseInpaintingTrainingModule_video):
 
         return total_loss.item(), batch, metrics
 
-# main
+# uni test
+import torch
+import unittest
+from src.config import Config
+from src.models.LaMa import *
+import argparse
+
+parser = argparse.ArgumentParser()
+parser.add_argument('--path', '--checkpoints', type=str, default=None,
+                    help='model checkpoints path (default: ./checkpoints)')
+parser.add_argument('--config_file', type=str, default='./config_list/config_LAMA_MPE_HR.yml',
+                    help='The config file of each experiment ')
+parser.add_argument('--nodes', type=int, default=1, help='how many machines')
+parser.add_argument('--gpus', type=int, default=1, help='how many GPUs in one node')
+parser.add_argument('--GPU_ids', type=str, default='0')
+parser.add_argument('--node_rank', type=int, default=0, help='the id of this machine')
+parser.add_argument('--DDP', action='store_true', help='DDP')
+parser.add_argument('--lama', action='store_true', help='train the lama first')
+# Define the size of transformer
+parser.add_argument('--ref_frame_num', type=int, default=5)
+parser.add_argument('--n_layer', type=int, default=16)
+parser.add_argument('--n_embd', type=int, default=256)
+parser.add_argument('--n_head', type=int, default=8)
+parser.add_argument('--lr', type=float, default=4.24e-4)
+# AMP
+parser.add_argument('--AMP', action='store_true', help='Automatic Mixed Precision')
+parser.add_argument('--local_rank', type=int, default=-1, help='the id of this machine')
+parser.add_argument('--loss_hole_valid_weight', type=float, nargs='+', default=[0.8, 0.2], help='the weight for computing the hole/valid part ')
+parser.add_argument('--loss_edge_line_weight', type=float, nargs='+', default=[1.0, 1.0], help='the weight for computing the edge/line part ')
+# add the choice to decide the loss function with l1 or mse or binary cross entropy with choice
+parser.add_argument('--loss_choice', type=str, default="bce", help='the choice of loss function: l1, mse, bce')
+parser.add_argument('--edge_gaussian', type=int, default=0, help='the sigma of gaussian kernel for edge')
+args = parser.parse_args()
+
+class TestDefaultInpaintingTrainingModule_video(unittest.TestCase):
+    def setUp(self):
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+        config = Config('./config_list/config_ZITS_video.yml')
+        self.model = DefaultInpaintingTrainingModule_video(args=args, config=config, gpu=0, rank=0, test=False).to(device)
+
+        # self.batch = {
+        #     'frames': torch.rand((1, 5, 3, 64, 64)).to(device),
+        #     'masks': torch.rand((1, 5, 1, 64, 64)).to(device),
+        #     'edges': torch.rand((1, 5, 1, 64, 64)).to(device),
+        #     'lines': torch.rand((1, 5, 1, 64, 64)).to(device),
+        #     'rel_pos': torch.rand((1, 5, 1, 64, 64)).to(device),
+        #     'direct': torch.rand((1, 5, 64, 64, 4)).to(device)  # four directions
+        # }
+        
+        dataset = DynamicDataset_video()
+        iterator = dataset.create_iterator(2)
+        self.batch = next(iterator)
+        # put all data in GPU
+        self.batch['frames'] = self.batch['frames'].to(device)
+        self.batch['masks'] = self.batch['masks'].to(device)
+        self.batch['edges'] = self.batch['edges'].to(device) 
+        self.batch['lines'] = self.batch['lines'].to(device)
+        self.batch['rel_pos'] = self.batch['rel_pos'].to(device)
+        self.batch['direct'] = self.batch['direct'].to(device)
+
+
+    def test_forward(self):
+        output = self.model.forward(self.batch)
+        self.assertTrue('predicted_video' in output)
+        self.assertTrue('inpainted' in output)
+        self.assertTrue('mask_for_losses' in output)
+
+    # def test_process(self):
+    #     output = self.model.process(self.batch)
+    #     self.assertTrue('predicted_video' in output[-1])
+    #     self.assertTrue(len(output) == 5)
+
+    # def test_generator_loss(self):
+    #     output = self.model.generator_loss(self.batch)
+    #     self.assertTrue(isinstance(output[0], float))
+    #     self.assertTrue(isinstance(output[1], dict))
+
+    # def test_discriminator_loss(self):
+    #     output = self.model.discriminator_loss(self.batch)
+    #     self.assertTrue(isinstance(output[0], float))
+    #     self.assertTrue(isinstance(output[1], dict))
+
 if __name__ == '__main__':
-    split = 'train'
+    unittest.main()
 
-    dataset = DynamicDataset_video()
-    # test loading the dataset
-    iterator = dataset.create_iterator(4)
-    for i in range(10):
-        batch = next(iterator)
-        print(batch['name'])
-        print(batch['size_ratio'])
-        print(batch['image'].shape)
-        print(batch['mask'].shape)
-        print(batch['edge'].shape)
-        print(batch['line'].shape)
-        print(batch['rel_pos'].shape)
-        print(batch['abs_pos'].shape)
-        print(batch['direct'].shape)
-        print()
+# # main
+# if __name__ == '__main__':
+#     split = 'train'
+
+#     dataset = DynamicDataset_video()
+#     # test loading the dataset
+#     iterator = dataset.create_iterator(4)
+#     for i in range(10):
+#         batch = next(iterator)
+#         print(batch['name'])
+#         print(batch['size_ratio'])
+#         print(batch['frames'].shape)
+#         print(batch['masks'].shape)
+#         print(batch['edges'].shape)
+#         print(batch['lines'].shape)
+#         print(batch['rel_pos'].shape)
+#         print(batch['abs_pos'].shape)
+#         print(batch['direct'].shape)
+#         print()
         
-        # combine above image, mask, edge, line, re_pls, abs_pos, direct into one image
-        # and then save the image in the folder
-        image = batch['image']
-        mask = batch['mask']
-        edge = batch['edge']
-        line = batch['line']
-        rel_pos = batch['rel_pos']
-        abs_pos = batch['abs_pos']
-        direct = batch['direct']
-        # turn image to numpy array
-        from torchvision.utils import make_grid, save_image
-        combined = torch.cat(tuple(image), dim=2)
-        combined_mask = torch.cat(tuple(mask), dim=2)
-        combined_edge = torch.cat(tuple(edge), dim=2)
-        combined_line = torch.cat(tuple(line), dim=2)
-        rel_pos.unsqueeze_(dim=2)  # add one dimension to the tensor
-        abs_pos.unsqueeze_(dim=2)
-        combined_rel = torch.cat(tuple(rel_pos), dim=2)
-        combined_abs = torch.cat(tuple(abs_pos), dim=2)
-        # rel_pos is torch.Size([4, 5, 256, 256]) image combined them with 4 rows and 5 columns
-        # combined_rel = torch.cat(rel_pos.unbind(dim=2), dim=1)  # unbind along the third dimension (dim=2), then concatenate along the second dimension (dim=1)
-        # combined_abs = torch.cat(abs_pos.unbind(dim=2), dim=1)
+#         # combine above image, mask, edge, line, re_pls, abs_pos, direct into one image
+#         # and then save the image in the folder
+#         image = batch['frames']
+#         mask = batch['masks']
+#         edge = batch['edges']
+#         line = batch['lines']
+#         rel_pos = batch['rel_pos']
+#         abs_pos = batch['abs_pos']
+#         direct = batch['direct']
+#         # turn image to numpy array
+#         from torchvision.utils import make_grid, save_image
+#         combined = torch.cat(tuple(image), dim=2)
+#         combined_mask = torch.cat(tuple(mask), dim=2)
+#         combined_edge = torch.cat(tuple(edge), dim=2)
+#         combined_line = torch.cat(tuple(line), dim=2)
+#         rel_pos.unsqueeze_(dim=2)  # add one dimension to the tensor
+#         abs_pos.unsqueeze_(dim=2)
+#         combined_rel = torch.cat(tuple(rel_pos), dim=2)
+#         combined_abs = torch.cat(tuple(abs_pos), dim=2)
+#         # rel_pos is torch.Size([4, 5, 256, 256]) image combined them with 4 rows and 5 columns
+#         # combined_rel = torch.cat(rel_pos.unbind(dim=2), dim=1)  # unbind along the third dimension (dim=2), then concatenate along the second dimension (dim=1)
+#         # combined_abs = torch.cat(abs_pos.unbind(dim=2), dim=1)
         
-        # save_image(combined, f'combined_image_{i}.png')
-        # save_image(combined_mask, f'combined_mask_{i}.png')
-        # save_image(combined_edge, f'combined_edge_{i}.png')
-        # save_image(combined_line, f'combined_line_{i}.png')
-        # combined_rel = combined_rel.float()  # Convert to float tensor
-        # combined_rel = (combined_rel - combined_rel.min()) / (combined_rel.max() - combined_rel.min())  # Normalize to [0, 1]
-        # save_image(combined_rel, f'combined_rel_{i}.png')
-        # combined_abs = combined_abs.float()  # Convert to float tensor
-        # combined_abs = (combined_abs - combined_abs.min()) / (combined_abs.max() - combined_abs.min())  # Normalize to [0, 1]
-        # save_image(combined_abs, f'combined_abs_{i}.png')
+#         # save_image(combined, f'combined_image_{i}.png')
+#         # save_image(combined_mask, f'combined_mask_{i}.png')
+#         # save_image(combined_edge, f'combined_edge_{i}.png')
+#         # save_image(combined_line, f'combined_line_{i}.png')
+#         # combined_rel = combined_rel.float()  # Convert to float tensor
+#         # combined_rel = (combined_rel - combined_rel.min()) / (combined_rel.max() - combined_rel.min())  # Normalize to [0, 1]
+#         # save_image(combined_rel, f'combined_rel_{i}.png')
+#         # combined_abs = combined_abs.float()  # Convert to float tensor
+#         # combined_abs = (combined_abs - combined_abs.min()) / (combined_abs.max() - combined_abs.min())  # Normalize to [0, 1]
+#         # save_image(combined_abs, f'combined_abs_{i}.png')
         
-        # # Let's assume tensor is your 4D tensor with shape [256, 256, 5, 4]
-        # direct = direct.permute(2, 3, 0, 1)  # Change the shape to [5, 4, 256, 256]
-        # direct = direct.reshape(-1, 256, 256)  # Flatten the first two dimensions, new shape is [20, 256, 256]
+#         # # Let's assume tensor is your 4D tensor with shape [256, 256, 5, 4]
+#         # direct = direct.permute(2, 3, 0, 1)  # Change the shape to [5, 4, 256, 256]
+#         # direct = direct.reshape(-1, 256, 256)  # Flatten the first two dimensions, new shape is [20, 256, 256]
 
-        # # Now, we need to add a dimension for channels, because make_grid and save_image expect tensors in the shape (C, H, W) or (B, C, H, W)
-        # direct = direct.unsqueeze(1)  # New shape is [20, 1, 256, 256]
+#         # # Now, we need to add a dimension for channels, because make_grid and save_image expect tensors in the shape (C, H, W) or (B, C, H, W)
+#         # direct = direct.unsqueeze(1)  # New shape is [20, 1, 256, 256]
 
-        # grid = make_grid(direct, nrow=4)  # Arrange images into a grid with 4 images per row
+#         # grid = make_grid(direct, nrow=4)  # Arrange images into a grid with 4 images per row
 
-        # # Normalize to [0, 1] and save
-        # grid = (grid - grid.min()) / (grid.max() - grid.min())
-        # save_image(grid, f'grid_{i}.png')
+#         # # Normalize to [0, 1] and save
+#         # grid = (grid - grid.min()) / (grid.max() - grid.min())
+#         # save_image(grid, f'grid_{i}.png')
         
 
-    # # test the iterator
-    # iterator = dataset.create_iterator(4)
-    # for i in range(10):
-    #     batch = next(iterator)
-    #     print(batch['name'])
-    #     print(batch['size_ratio'])
-    #     print(batch['image'].shape)
-    #     print(batch['mask'].shape)
-    #     print(batch['edge'].shape)
-    #     print(batch['line'].shape)
-    #     print(batch['rel_pos'].shape)
-    #     print(batch['abs_pos'].shape)
-    #     print(batch['direct'].shape)
-    #     print()
-
+#     #  test DefaultInpaintingTrainingModule_video
     
