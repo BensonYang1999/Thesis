@@ -685,41 +685,41 @@ class DefaultInpaintingTrainingModule_video(BaseInpaintingTrainingModule_video):
         original_mask = batch['masks']
         supervised_mask = batch['mask_for_losses']
         metrics = dict()
+        total_loss = 0.
 
-        for t in range(frames.shape[1]):
-            # L1
-            l1_value = masked_l1_loss(predicted_video[:, t], frames[:, t], supervised_mask[:, t],
-                                    self.config.losses['l1']['weight_known'],
-                                    self.config.losses['l1']['weight_missing'])
+        # L1
+        l1_value = masked_l1_loss(predicted_video, frames, supervised_mask,
+                                self.config.losses['l1']['weight_known'],
+                                self.config.losses['l1']['weight_missing'])
 
-            total_loss = l1_value
-            metrics[f'gen_l1_{t}'] = l1_value.item()
+        total_loss = l1_value
+        metrics[f'gen_l1'] = l1_value.item()
 
-            # discriminator
-            # adversarial_loss calls backward by itself
-            self.adversarial_loss.pre_generator_step(real_batch=frames[:, t], fake_batch=predicted_video[:, t],
-                                                    generator=self.generator, discriminator=self.discriminator)
-            discr_fake_pred, discr_fake_features = self.discriminator(predicted_video[:, t].to(torch.float32))
-            adv_gen_loss, adv_metrics = self.adversarial_loss.generator_loss(discr_fake_pred=discr_fake_pred,
-                                                                            mask=original_mask[:, t])
-            total_loss = total_loss + adv_gen_loss
-            metrics[f'gen_adv_{t}'] = adv_gen_loss.item()
-            metrics.update(add_prefix_to_keys(adv_metrics, f'adv_{t}_'))
+        # discriminator
+        # adversarial_loss calls backward by itself
+        self.adversarial_loss.pre_generator_step(real_batch=frames, fake_batch=predicted_video,
+                                                generator=self.generator, discriminator=self.discriminator)
+        discr_fake_pred, discr_fake_features = self.discriminator(predicted_video.to(torch.float32))
+        adv_gen_loss, adv_metrics = self.adversarial_loss.generator_loss(discr_fake_pred=discr_fake_pred,
+                                                                        mask=original_mask)
+        total_loss = total_loss + adv_gen_loss
+        metrics[f'gen_adv'] = adv_gen_loss.item()
+        metrics.update(add_prefix_to_keys(adv_metrics, f'adv'))
 
-            # feature matching
-            if self.config.losses['feature_matching']['weight'] > 0:
-                discr_real_pred, discr_real_features = self.discriminator(frames[:, t])
-                need_mask_in_fm = self.config.losses['feature_matching'].get('pass_mask', False)
-                mask_for_fm = supervised_mask[:, t] if need_mask_in_fm else None
-                fm_value = feature_matching_loss(discr_fake_features, discr_real_features,
-                                                mask=mask_for_fm) * self.config.losses['feature_matching']['weight']
-                total_loss += fm_value
-                metrics[f'gen_fm_{t}'] = fm_value.item()
+        # feature matching
+        if self.config.losses['feature_matching']['weight'] > 0:
+            discr_real_pred, discr_real_features = self.discriminator(frames)
+            need_mask_in_fm = self.config.losses['feature_matching'].get('pass_mask', False)
+            mask_for_fm = supervised_mask if need_mask_in_fm else None
+            fm_value = feature_matching_loss(discr_fake_features, discr_real_features,
+                                            mask=mask_for_fm) * self.config.losses['feature_matching']['weight']
+            total_loss += fm_value
+            metrics[f'gen_fm'] = fm_value.item()
 
-            if self.loss_resnet_pl is not None:
-                resnet_pl_value = self.loss_resnet_pl(predicted_video[:, t], frames[:, t])
-                total_loss += resnet_pl_value
-                metrics[f'gen_resnet_pl_{t}'] = resnet_pl_value.item()
+        if self.loss_resnet_pl is not None:
+            resnet_pl_value = self.loss_resnet_pl(predicted_video, frames)
+            total_loss += resnet_pl_value
+            metrics[f'gen_resnet_pl'] = resnet_pl_value.item()
 
         if self.config.AMP:
             self.scaler.scale(total_loss).backward()
@@ -819,21 +819,21 @@ class TestDefaultInpaintingTrainingModule_video(unittest.TestCase):
         self.batch['inpainted'] = output['inpainted']
         self.batch['mask_for_losses'] = output['mask_for_losses']
 
-    # def test_forward(self):
-    #     output = self.model.forward(self.batch)
-    #     self.assertTrue('predicted_video' in output)
-    #     self.assertTrue('inpainted' in output)
-    #     self.assertTrue('mask_for_losses' in output)
+    def test_forward(self):
+        output = self.model.forward(self.batch)
+        self.assertTrue('predicted_video' in output)
+        self.assertTrue('inpainted' in output)
+        self.assertTrue('mask_for_losses' in output)
 
-    # def test_process(self):
-    #     output = self.model.process(self.batch)
-    #     self.assertTrue('predicted_video' in output[-1])
-    #     self.assertTrue(len(output) == 5)
+    def test_process(self):
+        output = self.model.process(self.batch)
+        self.assertTrue('predicted_video' in output[-1])
+        self.assertTrue(len(output) == 5)
 
-    # def test_generator_loss(self):
-    #     output = self.model.generator_loss(self.batch)
-    #     self.assertTrue(isinstance(output[0], float))
-    #     self.assertTrue(isinstance(output[1], dict))
+    def test_generator_loss(self):
+        output = self.model.generator_loss(self.batch)
+        self.assertTrue(isinstance(output[0], float))
+        self.assertTrue(isinstance(output[1], dict))
 
     def test_discriminator_loss(self):
         output = self.model.discriminator_loss(self.batch)

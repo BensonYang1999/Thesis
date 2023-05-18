@@ -138,10 +138,14 @@ class ResNetPL_video(nn.Module):
 
     def forward(self, pred, target):
         # pred and target are now of shape [batch_size, num_frames, height, width, num_channels]
+        b, t, c, h, w = pred.shape
+
         pred = (pred - IMAGENET_MEAN.to(pred)) / IMAGENET_STD.to(pred)
         target = (target - IMAGENET_MEAN.to(target)) / IMAGENET_STD.to(target)
 
-        # We calculate the perceptual loss for each frame in the video
+        pred = pred.view(b * t, c, h, w)
+        target = target.view(b * t, c, h, w)
+
         result = 0
         for frame_pred, frame_target in zip(pred, target):
             frame_pred_feats = self.impl(frame_pred.unsqueeze(0), return_feature_maps=True)
