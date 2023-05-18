@@ -475,10 +475,10 @@ class BaseInpaintingTrainingModule_video(nn.Module):
 
         if not test:
             # self.discriminator = NLayerDiscriminator_video(**self.config.discriminator).cuda(gpu) 
-            self.discriminator = NLayerDiscriminator(**self.config.discriminator).cuda(gpu) 
+            self.discriminator = NLayerDiscriminator_video_2D(**self.config.discriminator).cuda(gpu) 
             # self.discriminator = net.Discriminator(
             #     in_channels=3, use_sigmoid=config['losses']['GAN_LOSS'] != 'hinge').cuda(gpu)  # video version referr to FuseFormer
-            self.adversarial_loss = NonSaturatingWithR1(**self.config.losses['adversarial'])
+            self.adversarial_loss = NonSaturatingWithR1_video_2D(**self.config.losses['adversarial'])
             # self.adversarial_loss = AdversarialLoss(type=self.config['losses']['GAN_LOSS']).cuda(gpu) # video version reference to FuseFormer
             self.generator_average = None
             self.last_generator_averaging_step = -1
@@ -615,6 +615,7 @@ class BaseInpaintingTrainingModule_video(nn.Module):
         ]
 
 
+from src.losses.feature_matching import *
 class DefaultInpaintingTrainingModule_video(BaseInpaintingTrainingModule_video):
     def __init__(self, args, config, gpu, rank, video_to_discriminator='predicted_video', test=False, **kwargs):
         super().__init__(args=args, config=config, gpu=gpu, name='InpaintingModel', rank=rank, test=test, **kwargs)
@@ -683,6 +684,7 @@ class DefaultInpaintingTrainingModule_video(BaseInpaintingTrainingModule_video):
         predicted_video = batch[self.video_to_discriminator] 
         original_mask = batch['masks']
         supervised_mask = batch['mask_for_losses']
+        metrics = dict()
 
         for t in range(frames.shape[1]):
             # L1
@@ -726,34 +728,28 @@ class DefaultInpaintingTrainingModule_video(BaseInpaintingTrainingModule_video):
         return total_loss.item(), metrics
 
     def discriminator_loss(self, batch):
-        frames = batch['frames'] # Change 'image' to 'video'
-        total_loss = 0
-        metrics = []
-
-        for t in range(frames.shape[1]): # for each frame in the video
-            if self.config.AMP:
-                with torch.cuda.amp.autocast():
-                    batch = self.forward(batch)
-            else:
-                batch = self(batch)
-
-            self.adversarial_loss.pre_discriminator_step(real_batch=frames[:, t], fake_batch=None,
-                                                        generator=self.generator, discriminator=self.discriminator)
-            discr_real_pred, discr_real_features = self.discriminator(frames[:, t])
-            real_loss, dis_real_loss, grad_penalty = self.adversarial_loss.discriminator_real_loss(
-                real_batch=frames[:, t],
-                discr_real_pred=discr_real_pred)
-            real_loss.backward()
-            batch[self.video_to_discriminator] = batch[self.video_to_discriminator].to(torch.float32)
-            predicted_frame = batch[self.video_to_discriminator].detach()
-            discr_fake_pred, discr_fake_features = self.discriminator(predicted_frame[:, t].to(torch.float32))
-            fake_loss = self.adversarial_loss.discriminator_fake_loss(discr_fake_pred=discr_fake_pred, mask=batch['masks'][:, t])
-            fake_loss.backward()
-            total_loss = fake_loss + real_loss
-            metrics = {}
-            metrics[f'dis_real_loss_{t}'] = dis_real_loss.mean().item()
-            metrics[f'dis_fake_loss_{t}'] = fake_loss.item()
-            metrics[f'grad_penalty_{t}'] = grad_penalty.mean().item()
+        self.adversarial_loss.pre_discriminator_step(real_batch=batch['frames'], fake_batch=None,
+                                                     generator=self.generator, discriminator=self.discriminator)
+        discr_real_pred, discr_real_features = self.discriminator(batch['frames'])
+        real_loss, dis_real_loss, grad_penalty = self.adversarial_loss.discriminator_real_loss(
+            real_batch=batch['frames'],
+            discr_real_pred=discr_real_pred)
+        real_loss.backward()
+        if self.config.AMP:
+            with torch.cuda.amp.autocast():
+                batch = self.forward(batch)
+        else:
+            batch = self(batch)
+        batch[self.video_to_discriminator] = batch[self.video_to_discriminator].to(torch.float32)
+        predicted_video = batch[self.video_to_discriminator].detach()
+        discr_fake_pred, discr_fake_features = self.discriminator(predicted_video.to(torch.float32))
+        fake_loss = self.adversarial_loss.discriminator_fake_loss(discr_fake_pred=discr_fake_pred, mask=batch['masks'])
+        fake_loss.backward()
+        total_loss = fake_loss + real_loss
+        metrics = {}
+        metrics['dis_real_loss'] = dis_real_loss.mean().item()
+        metrics['dis_fake_loss'] = fake_loss.item()
+        metrics['grad_penalty'] = grad_penalty.mean().item()
 
         return total_loss.item(), batch, metrics
 
@@ -817,13 +813,17 @@ class TestDefaultInpaintingTrainingModule_video(unittest.TestCase):
         self.batch['lines'] = self.batch['lines'].to(device)
         self.batch['rel_pos'] = self.batch['rel_pos'].to(device)
         self.batch['direct'] = self.batch['direct'].to(device)
-
-
-    def test_forward(self):
+        
         output = self.model.forward(self.batch)
-        self.assertTrue('predicted_video' in output)
-        self.assertTrue('inpainted' in output)
-        self.assertTrue('mask_for_losses' in output)
+        self.batch['predicted_video'] = output['predicted_video']
+        self.batch['inpainted'] = output['inpainted']
+        self.batch['mask_for_losses'] = output['mask_for_losses']
+
+    # def test_forward(self):
+    #     output = self.model.forward(self.batch)
+    #     self.assertTrue('predicted_video' in output)
+    #     self.assertTrue('inpainted' in output)
+    #     self.assertTrue('mask_for_losses' in output)
 
     # def test_process(self):
     #     output = self.model.process(self.batch)
@@ -835,10 +835,10 @@ class TestDefaultInpaintingTrainingModule_video(unittest.TestCase):
     #     self.assertTrue(isinstance(output[0], float))
     #     self.assertTrue(isinstance(output[1], dict))
 
-    # def test_discriminator_loss(self):
-    #     output = self.model.discriminator_loss(self.batch)
-    #     self.assertTrue(isinstance(output[0], float))
-    #     self.assertTrue(isinstance(output[1], dict))
+    def test_discriminator_loss(self):
+        output = self.model.discriminator_loss(self.batch)
+        self.assertTrue(isinstance(output[0], float))
+        self.assertTrue(isinstance(output[1], dict))
 
 if __name__ == '__main__':
     unittest.main()
