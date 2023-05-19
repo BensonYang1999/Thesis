@@ -315,6 +315,7 @@ class DynamicDataset_video(torch.utils.data.Dataset):
         batch['size_ratio'] = size / self.default_size
 
         batch['name'] = self.load_name(index)
+        batch['idxs'] = [all_frames[idx].split('/')[-1] for idx in ref_index]
 
         # load pos encoding
         rel_pos_list, abs_pos_list, direct_list = [], [], []
@@ -840,8 +841,133 @@ class TestDefaultInpaintingTrainingModule_video(unittest.TestCase):
         self.assertTrue(isinstance(output[0], float))
         self.assertTrue(isinstance(output[1], dict))
 
+"""
+Below is the code to test the evaluation function. Reference to FuseFormer
+"""
+class ZITS_video:
+    def __init__(self, config, gpu, rank, test=False, single_img_test=False):
+        self.config = config
+        self.device = gpu
+        self.global_rank = rank
+
+        self.model_name = 'inpaint'
+
+        kwargs = dict(config.training_model)
+        kwargs.pop('kind')
+
+        self.inpaint_model = DefaultInpaintingTrainingModule(config, gpu=gpu, rank=rank, test=test, **kwargs).to(gpu)
+
+        if config.min_sigma is None:
+            min_sigma = 2.0
+        else:
+            min_sigma = config.min_sigma
+        if config.max_sigma is None:
+            max_sigma = 2.5
+        else:
+            max_sigma = config.max_sigma
+        if config.round is None:
+            round = 1
+        else:
+            round = config.round
+
+        if not test:
+            # self.train_dataset = DynamicDataset(config.TRAIN_FLIST, mask_path=config.TRAIN_MASK_FLIST,
+            #                                     batch_size=config.BATCH_SIZE // config.world_size,
+            #                                     pos_num=config.rel_pos_num, augment=True, training=True,
+            #                                     test_mask_path=None, train_line_path=config.train_line_path,
+            #                                     add_pos=config.use_MPE, world_size=config.world_size,
+            #                                     min_sigma=min_sigma, max_sigma=max_sigma, round=round)
+            self.train_dataset = DynamicDataset_video()
+
+            if config.DDP:
+                self.train_sampler = DistributedSampler(self.train_dataset, num_replicas=config.world_size,
+                                                        rank=self.global_rank, shuffle=True)
+            else:
+                self.train_sampler = DistributedSampler(self.train_dataset, num_replicas=1, rank=0, shuffle=True)
+
+            self.samples_path = os.path.join(config.PATH, 'samples')
+            self.results_path = os.path.join(config.PATH, 'results')
+
+            self.log_file = os.path.join(config.PATH, 'log_' + self.model_name + '.dat')
+
+            self.best = float("inf") if self.inpaint_model.best is None else self.inpaint_model.best
+
+        if not single_img_test:
+            # self.val_dataset = DynamicDataset(config.VAL_FLIST, mask_path=None, pos_num=config.rel_pos_num,
+            #                                   batch_size=config.BATCH_SIZE, augment=False, training=False,
+            #                                   test_mask_path=config.TEST_MASK_FLIST,
+            #                                   eval_line_path=config.eval_line_path,
+            #                                   add_pos=config.use_MPE, input_size=config.INPUT_SIZE,
+            #                                   min_sigma=min_sigma, max_sigma=max_sigma)
+            self.val_dataset = DynamicDataset_video(split='val')
+
+            self.sample_iterator = self.val_dataset.create_iterator(config.SAMPLE_SIZE)
+            self.val_path = os.path.join(config.PATH, 'validation')
+            create_dir(self.val_path)
+
+    def eval():
+        val_loader = DataLoader(self.val_dataset, shuffle=False, pin_memory=True,
+                                batch_size=self.config.BATCH_SIZE, num_workers=12)
+
+        self.inpaint_model.eval()  # set model to eval mode
+
+        with torch.no_grad(): 
+            for items in tqdm(val_loader):
+                for k in items:
+                    if type(items[k]) is torch.Tensor:
+                        items[k] = items[k].to(self.device)
+                b, t, _, _, _ = items['edges'].shape
+                # edge_pred, line_pred = SampleEdgeLineLogits_video(self.inpaint_model.transformer,
+                #                                             context=[items['img_256'][:b, ...],
+                #                                                         items['edge_256'][:b, ...],
+                #                                                         items['line_256'][:b, ...]],
+                #                                             mask=items['mask_256'][:b, ...].clone(),
+                #                                             iterations=5,
+                #                                             add_v=0.05, mul_v=4,
+                #                                             device=self.device)
+                # edge_pred, line_pred = edge_pred[:b, ...].detach().to(torch.float32), \
+                #                         line_pred[:b, ...].detach().to(torch.float32)
+                edge_pred, line_pred = self.inpaint_model.transformer.forward_with_logits(img_idx=items['frames'], \
+                                                          edge_idx=items['edges'], line_idx=items['lines'], masks=items['masks'])
+                edge_pred, line_pred = edge_pred.detach().to(torch.float32), line_pred.detach().to(torch.float32)
+                if self.config.fix_256 is None or self.config.fix_256 is False:
+                    edge_pred = self.inpaint_model.structure_upsample(edge_pred)[0]
+                    edge_pred = torch.sigmoid((edge_pred + 2) * 2)
+                    line_pred = self.inpaint_model.structure_upsample(line_pred)[0]
+                    line_pred = torch.sigmoid((line_pred + 2) * 2)
+                # items['edge'][:b, ...] = edge_pred.detach()
+                # items['line'][:b, ...] = line_pred.detach()
+                items['edges'] = edge_pred.detach() # the inpainted edges
+                items['lines'] = line_pred.detach() # # the inpainted lines
+                # eval
+                items = self.inpaint_model(items)
+                outputs_merged = (items['predicted_image'] * items['mask']) + (items['image'] * (1 - items['mask']))
+                # TODO
+                # save
+                outputs_merged *= 255.0
+                outputs_merged = outputs_merged.permute(0, 2, 3, 1).int().cpu().numpy()
+                for img_num in range(b):
+                    cv2.imwrite(self.val_path + '/' + items['name'][img_num], outputs_merged[img_num, :, :, ::-1])
+
+        our_metric = get_inpainting_metrics_video(self.val_path, self.config.GT_Val_FOLDER, None, fid_test=True) # video version
+
+        if self.global_rank == 0:
+            print("iter: %d, PSNR: %f, SSIM: %f, VFID: %f" %
+                    (self.inpaint_model.iteration, float(our_metric['psnr']), float(our_metric['ssim']),
+                    float(our_metric['fid']), float(our_metric['lpips'])))
+            logs = [('iter', self.inpaint_model.iteration), ('PSNR', float(our_metric['psnr'])),
+                    ('SSIM', float(our_metric['ssim'])), ('VFID', float(our_metric['vfid']))]
+            self.log(logs)
+        return float(our_metric['psnr']), float(our_metric['ssim']), float(our_metric['vfid'])
+
+
 if __name__ == '__main__':
-    unittest.main()
+    # test the ZITS_video eval function
+    
+
+
+# if __name__ == '__main__':
+#     unittest.main()
 
 # # main
 # if __name__ == '__main__':

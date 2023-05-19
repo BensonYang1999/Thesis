@@ -279,6 +279,110 @@ def get_inpainting_metrics(src, tgt, logger, fid_test=True):
                                                                                                  ds))
         return {'psnr': psnr, 'ssim': ssim, 'mse': mse, 'mae': mae, 'lpips': ds}
 
+"""
+Below is for video version evaluation
+"""
+def get_origin_inpainted_frame_list(origin_path, result_path):
+    origin_folder = sorted(os.listdir(origin_path))
+    origin_list = [os.path.join(origin_path, name) for name in origin_folder]
+    result_folder = sorted(os.listdir(result_path))
+    result_list = [os.path.join(result_path, name) for name in result_folder]
+
+    print(f"[Finish building creating original video and inpainted result list {origin_path}, {result_path}]")
+    return frame_list, mask_list
+
+def read_frame_from_videos(vname):
+    lst = os.listdir(vname)
+    lst.sort()
+    fr_lst = [vname+'/'+name for name in lst]
+    frames = []
+    for fr in fr_lst:
+        image = cv2.imread(fr)
+        image = Image.fromarray(cv2.cvtColor(image, cv2.COLOR_BGR2RGB))
+    return frames  
+
+_to_tensors = transforms.Compose([
+    Stack(),
+    ToTorchFormatTensor()])
+
+def get_i3d_activations(batched_video, target_endpoint='Logits', flatten=True, grad_enabled=False):
+    """
+    Get features from i3d model and flatten them to 1d feature,
+    valid target endpoints are defined in InceptionI3d.VALID_ENDPOINTS
+    VALID_ENDPOINTS = (
+        'Conv3d_1a_7x7',
+        'MaxPool3d_2a_3x3',
+        'Conv3d_2b_1x1',
+        'Conv3d_2c_3x3',
+        'MaxPool3d_3a_3x3',
+        'Mixed_3b',
+        'Mixed_3c',
+        'MaxPool3d_4a_3x3',
+        'Mixed_4b',
+        'Mixed_4c',
+        'Mixed_4d',
+        'Mixed_4e',
+        'Mixed_4f',
+        'MaxPool3d_5a_2x2',
+        'Mixed_5b',
+        'Mixed_5c',
+        'Logits',
+        'Predictions',
+    )
+    """
+    init_i3d_model()
+    with torch.set_grad_enabled(grad_enabled):
+        feat = i3d_model.extract_features(batched_video.transpose(1, 2), target_endpoint)
+    if flatten:
+        feat = feat.view(feat.size(0), -1)
+
+    return feat
+
+def get_inpainting_metrics_video(src, tgt, logger, fid_test=True):
+    input_list, output_list = get_origin_inpainted_frame_list(src, tgt) # input -> ground truth
+
+    assert len(result_path) == len(output_list), (len(result_path), len(output_list)) # make sure the number of images is the same
+    
+    video_num = len(frame_list) # number of videos
+
+    ssim_all, psnr_all, len_all = 0., 0., 0. 
+    s_psnr_all = 0. 
+    video_length_all = 0 
+    vfid = 0.
+    output_i3d_activations = []
+    real_i3d_activations = []
+
+    for video_no in range(video_num):
+        print("[Processing: {}]".format(input_list[video_no].split("/")[-1])) # print video name
+        gt_PIL = read_frame_from_videos(input_list[video_no]) # read GT
+        pred_PIL = read_frame_from_videos(output_list[video_no]) # read inpainted
+        video_length = len(gt_PIL) # length of the video
+
+        ssim, psnr, s_psnr = 0., 0., 0. 
+        for gt_img, pred_img in zip(gt_PIL, pred_PIL):
+            gt_img = np.array(gt_img)
+            pred_img = np.array(pred_img)
+            print(f"gt_img: {gt_img}") # test
+            print(f"pred_img: {pred_img}") # test
+            ssim += measure.compare_ssim(gt_img, pred_img, data_range=255, multichannel=True, win_size=65)
+            s_psnr += measure.compare_psnr(gt_img, pred_img, data_range=255)
+
+        ssim_all += ssim
+        s_psnr_all += s_psnr
+        video_length_all += (video_length)
+        if video_no % 50 ==1:
+            print("ssim {}, psnr {}".format(ssim_all/video_length_all, s_psnr_all/video_length_all))
+        # FVID computation
+        gts = _to_tensors(gt_PIL).unsqueeze(0).to(device)
+        preds = _to_tensors(pred_PIL).unsqueeze(0).to(device)
+        real_i3d_activations.append(get_i3d_activations(gts).cpu().numpy().flatten())
+        output_i3d_activations.append(get_i3d_activations(preds).cpu().numpy().flatten())
+    fid_score = get_fid_score(real_i3d_activations, output_i3d_activations)
+    print("[Finish evaluating, ssim is {}, psnr is {}]".format(ssim_all/video_length_all, s_psnr_all/video_length_all))
+    print("[vfid score is {}]".format(fid_score))
+
+    return {'psnr': s_psnr_all/video_length_all, 'ssim': ssim_all/video_length_all, 'vfid': fid_score}
+
 
 if __name__ == "__main__":
     tgt = 'GT' # ground truth
