@@ -282,14 +282,14 @@ def get_inpainting_metrics(src, tgt, logger, fid_test=True):
 """
 Below is for video version evaluation
 """
-def get_origin_inpainted_frame_list(origin_path, result_path):
-    origin_folder = sorted(os.listdir(origin_path))
-    origin_list = [os.path.join(origin_path, name) for name in origin_folder]
-    result_folder = sorted(os.listdir(result_path))
-    result_list = [os.path.join(result_path, name) for name in result_folder]
+def get_pred_gt_frame_list(pred_path, gt_path):
+    pred_folder = sorted(os.listdir(pred_path))
+    pred_list = [os.path.join(pred_path, name) for name in pred_folder]
+    gt_folder = sorted(os.listdir(gt_path))
+    gt_list = [os.path.join(gt_path, name) for name in gt_folder]
 
     print(f"[Finish building creating original video and inpainted result list {origin_path}, {result_path}]")
-    return frame_list, mask_list
+    return pred_list, gt_list
 
 def read_frame_from_videos(vname):
     lst = os.listdir(vname)
@@ -339,9 +339,9 @@ def get_i3d_activations(batched_video, target_endpoint='Logits', flatten=True, g
     return feat
 
 def get_inpainting_metrics_video(src, tgt, logger, fid_test=True):
-    input_list, output_list = get_origin_inpainted_frame_list(src, tgt) # input -> ground truth
+    pred_list, gt_list = get_origin_inpainted_frame_list(src, tgt) # input -> ground truth
 
-    assert len(result_path) == len(output_list), (len(result_path), len(output_list)) # make sure the number of images is the same
+    assert len(result_path) == len(gt_list), (len(result_path), len(gt_list)) # make sure the number of images is the same
     
     video_num = len(frame_list) # number of videos
 
@@ -353,9 +353,9 @@ def get_inpainting_metrics_video(src, tgt, logger, fid_test=True):
     real_i3d_activations = []
 
     for video_no in range(video_num):
-        print("[Processing: {}]".format(input_list[video_no].split("/")[-1])) # print video name
-        gt_PIL = read_frame_from_videos(input_list[video_no]) # read GT
-        pred_PIL = read_frame_from_videos(output_list[video_no]) # read inpainted
+        print("[Processing: {}]".format(pred_list[video_no].split("/")[-1])) # print video name
+        gt_PIL = read_frame_from_videos(pred_list[video_no]) # read GT
+        pred_PIL = read_frame_from_videos(gt_list[video_no]) # read inpainted
         video_length = len(gt_PIL) # length of the video
 
         ssim, psnr, s_psnr = 0., 0., 0. 
