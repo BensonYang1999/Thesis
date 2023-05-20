@@ -574,7 +574,7 @@ class DynamicDataset_video(torch.utils.data.Dataset):
                  world_size=1,
                  round=1, sample=5): 
         # super(DynamicDataset, self).__init__()
-        self.training = (split=='train') # training or testing
+        self.training = (split=='train' or split=='valid') # training or testing
         self.batch_size = batch_size
         self.round = round  # for places2 round is 32
         self.sample_length = sample
@@ -637,22 +637,23 @@ class DynamicDataset_video(torch.utils.data.Dataset):
                 count = 0
                 barrel_idx += 1
         # random img size:256~512
-        if self.training:
-            barrel_num = int(len(self.video_name) / (self.batch_size * self.world_size))
-            barrel_num += 2
-            if self.round == 1:
-                self.input_size = np.clip(np.arange(32, 65,
-                                                    step=(65 - 32) / barrel_num * 2).astype(int) * 8, 256, 512).tolist()
-                self.input_size = self.input_size[::-1] + self.input_size
-            else:
-                self.input_size = []
-                input_size = np.clip(np.arange(32, 65, step=(65 - 32) / barrel_num * 2 * self.round).astype(int) * 8,
-                                     256, 512).tolist()
-                for _ in range(self.round + 1):
-                    self.input_size.extend(input_size[::-1])
-                    self.input_size.extend(input_size)
-        else:
-            self.input_size = self.default_size
+        # if self.training:
+        #     barrel_num = int(len(self.video_name) / (self.batch_size * self.world_size))
+        #     barrel_num += 2
+        #     if self.round == 1:
+        #         self.input_size = np.clip(np.arange(32, 65,
+        #                                             step=(65 - 32) / barrel_num * 2).astype(int) * 8, 256, 512).tolist()
+        #         self.input_size = self.input_size[::-1] + self.input_size
+        #     else:
+        #         self.input_size = []
+        #         input_size = np.clip(np.arange(32, 65, step=(65 - 32) / barrel_num * 2 * self.round).astype(int) * 8,
+        #                              256, 512).tolist()
+        #         for _ in range(self.round + 1):
+        #             self.input_size.extend(input_size[::-1])
+        #             self.input_size.extend(input_size)
+        # else:
+        #     self.input_size = self.default_size
+        self.input_size = self.default_size
 
     def __len__(self):
         return len(self.video_name)
@@ -747,6 +748,7 @@ class DynamicDataset_video(torch.utils.data.Dataset):
         batch['size_ratio'] = size / self.default_size
 
         batch['name'] = self.load_name(index)
+        batch['idxs'] = [all_frames[idx].split('/')[-1] for idx in ref_index]
 
         # load pos encoding
         rel_pos_list, abs_pos_list, direct_list = [], [], []
@@ -770,6 +772,7 @@ class DynamicDataset_video(torch.utils.data.Dataset):
         batch['rel_pos'] = rel_pos_list.clone().detach().to(torch.long)
         batch['abs_pos'] = abs_pos_list.clone().detach().to(torch.long)
         batch['direct'] = direct_list.clone().detach().to(torch.long)
+        # batch['direct'] = batch['direct'].permute(0, 3, 1, 2)
 
         return batch
 
