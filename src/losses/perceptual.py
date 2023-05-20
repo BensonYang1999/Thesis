@@ -147,6 +147,7 @@ class ResNetPL_video(nn.Module):
         target = target.view(b * t, c, h, w)
 
         result = 0
+        
         for frame_pred, frame_target in zip(pred, target):
             frame_pred_feats = self.impl(frame_pred.unsqueeze(0), return_feature_maps=True)
             frame_target_feats = self.impl(frame_target.unsqueeze(0), return_feature_maps=True)

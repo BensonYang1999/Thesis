@@ -409,7 +409,6 @@ def get_inpainting_metrics_video(src, tgt, logger, device):
         preds = _to_tensors(pred_PIL).unsqueeze(0).to(device)
         real_i3d_activations.append(get_i3d_activations(gts).cpu().numpy().flatten())
         output_i3d_activations.append(get_i3d_activations(preds).cpu().numpy().flatten())
-        print(f"PSNR: {s_psnr/video_length}, SSIM: {ssim/video_length}, VFID: {get_fid_score(real_i3d_activations[-1], output_i3d_activations[-1])}") # test ") # test
     fid_score = get_fid_score(real_i3d_activations, output_i3d_activations)
     
     ssim_final = ssim_all/video_length_all
