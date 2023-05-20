@@ -426,57 +426,57 @@ class EdgeLineGPT256RelBCE_video(nn.Module):
             # print(f"edge: {edge}")
 
             # hole loss
-            hole_weight, valid_weight = self.opts.loss_hole_valid_weight
-            edge_weight, line_weight = self.opts.loss_edge_line_weight
+            # hole_weight, valid_weight = self.opts.loss_hole_valid_weight
+            # edge_weight, line_weight = self.opts.loss_edge_line_weight
 
-            masks_mean = torch.mean(masks)
-            one_minus_masks_mean = torch.mean(1 - masks)
+            # masks_mean = torch.mean(masks)
+            # one_minus_masks_mean = torch.mean(1 - masks)
 
-            edge_hole_loss = self.loss_function(edge * masks, edge_targets * masks)
-            edge_hole_loss = edge_hole_loss / (masks_mean + eps)
+            # edge_hole_loss = self.loss_function(edge * masks, edge_targets * masks)
+            # edge_hole_loss = edge_hole_loss / (masks_mean + eps)
 
-            line_hole_loss = self.loss_function(line * masks, line_targets * masks)
-            line_hole_loss = line_hole_loss / (masks_mean + eps)
+            # line_hole_loss = self.loss_function(line * masks, line_targets * masks)
+            # line_hole_loss = line_hole_loss / (masks_mean + eps)
 
-            # total loss
-            loss += (edge_hole_loss * edge_weight + line_hole_loss * line_weight) * hole_weight
+            # # total loss
+            # loss += (edge_hole_loss * edge_weight + line_hole_loss * line_weight) * hole_weight
 
-            # valid loss
-            edge_valid_loss = self.loss_function(edge * (1 - masks), edge_targets * (1 - masks))
-            edge_valid_loss = edge_valid_loss / (one_minus_masks_mean + eps)
+            # # valid loss
+            # edge_valid_loss = self.loss_function(edge * (1 - masks), edge_targets * (1 - masks))
+            # edge_valid_loss = edge_valid_loss / (one_minus_masks_mean + eps)
 
-            line_valid_loss = self.loss_function(line * (1 - masks), line_targets * (1 - masks))
-            line_valid_loss = line_valid_loss / (one_minus_masks_mean + eps)
+            # line_valid_loss = self.loss_function(line * (1 - masks), line_targets * (1 - masks))
+            # line_valid_loss = line_valid_loss / (one_minus_masks_mean + eps)
 
-            # total loss
-            loss += (edge_valid_loss * edge_weight + line_valid_loss * line_weight) * valid_weight
+            # # total loss
+            # loss += (edge_valid_loss * edge_weight + line_valid_loss * line_weight) * valid_weight
 
             
             # ZITS loss computation
             # edge loss
-            # loss = nnF.binary_cross_entropy_with_logits(edge.permute(0, 2, 3, 1).contiguous().view(-1, 1),
-            #                                           edge_targets.permute(0, 2, 3, 1).contiguous().view(-1, 1),
-            #                                           reduction='none')
+            loss_edge = nnF.binary_cross_entropy_with_logits(edge.permute(0, 2, 3, 1).contiguous().view(-1, 1),
+                                                      edge_targets.permute(0, 2, 3, 1).contiguous().view(-1, 1),
+                                                      reduction='none')
             # line loss
-            # loss = loss + nnF.binary_cross_entropy_with_logits(line.permute(0, 2, 3, 1).contiguous().view(-1, 1),
-            #                                                  line_targets.permute(0, 2, 3, 1).contiguous().view(-1, 1),
-            #                                                  reduction='none')
+            loss_line = nnF.binary_cross_entropy_with_logits(line.permute(0, 2, 3, 1).contiguous().view(-1, 1),
+                                                             line_targets.permute(0, 2, 3, 1).contiguous().view(-1, 1),
+                                                             reduction='none')
             
-            # masks_ = masks.permute(0, 2, 3, 1).contiguous().view(-1, 1) # only compute the loss in the masked region
+            masks_ = masks.permute(0, 2, 3, 1).contiguous().view(-1, 1) # only compute the loss in the masked region
 
-            # loss *= masks_
+            loss = (loss_edge+loss_line) * masks_
             # print(f"loss shape: {loss.size()}") # test
-            # loss = torch.mean(loss)
+            loss = torch.mean(loss)
         else:
             loss = 0
 
-        # edge, line = self.act_last(edge), self.act_last(line)  # sigmoid activate 
         edge, line = edge.view(b, t, 1, h, w), line.view(b, t, 1, h, w)
+        edge, line = self.act_last(edge), self.act_last(line)  # sigmoid activate 
 
-        # edge_hole_loss *= self.opts.loss_weight[0]
-        # edge_valid_loss *= self.opts.loss_weight[1]
-        # line_hole_loss *= self.opts.loss_weight[0]
-        # line_valid_loss *= self.opts.loss_weight[1]
+        edge_hole_loss = (loss_edge*masks_)*self.opts.loss_weight[0]
+        edge_valid_loss = (loss_edge*(1-masks_))*self.opts.loss_weight[1]
+        line_hole_loss = (loss_line*masks_)*self.opts.loss_weight[0]
+        line_valid_loss = (loss_line*(1-masks_))*self.opts.loss_weight[1]
         loss_detail = [edge_hole_loss, edge_valid_loss, line_hole_loss, line_valid_loss]
 
         return edge, line, loss, loss_detail
