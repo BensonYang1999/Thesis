@@ -850,12 +850,12 @@ class ZITS_video:
         self.device = gpu
         self.global_rank = rank
 
-        self.model_name = 'inpaint'
+        self.model_name = 'inpaint' # this final RGB video inpainting model name
 
         kwargs = dict(config.training_model)
         kwargs.pop('kind')
 
-        self.inpaint_model = DefaultInpaintingTrainingModule(config, gpu=gpu, rank=rank, test=test, **kwargs).to(gpu)
+        self.inpaint_model = DefaultInpaintingTrainingModule(config, gpu=gpu, rank=rank, test=test, **kwargs).to(gpu) 
 
         if config.min_sigma is None:
             min_sigma = 2.0
@@ -963,7 +963,9 @@ class ZITS_video:
 
 if __name__ == '__main__':
     # test the ZITS_video eval function
+    from src.inpainting_metrics import get_inpainting_metrics_video
     
+    print(get_inpainting_metrics_video(src='datasets/YouTubeVOS/test_all_frames/JPEGImages/', tgt='datasets/YouTubeVOS/test_all_frames/JPEGImages/', logger=None, device="cuda"))
 
 
 # if __name__ == '__main__':

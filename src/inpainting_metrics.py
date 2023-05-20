@@ -15,6 +15,11 @@ from src.models.inception import InceptionV3
 import torch.nn as nn
 import lpips
 
+import torchvision.transforms as transforms
+from src.Fuseformer.utils import Stack, ToTorchFormatTensor
+from PIL import Image
+from skimage import measure
+
 
 def get_activations(images, model, batch_size=64, dims=2048,
                     cuda=False, verbose=False):
@@ -282,13 +287,17 @@ def get_inpainting_metrics(src, tgt, logger, fid_test=True):
 """
 Below is for video version evaluation
 """
+from src.models.i3d import InceptionI3d
+
+i3d_model = None
+
 def get_pred_gt_frame_list(pred_path, gt_path):
     pred_folder = sorted(os.listdir(pred_path))
     pred_list = [os.path.join(pred_path, name) for name in pred_folder]
     gt_folder = sorted(os.listdir(gt_path))
     gt_list = [os.path.join(gt_path, name) for name in gt_folder]
 
-    print(f"[Finish building creating original video and inpainted result list {origin_path}, {result_path}]")
+    print(f"[Finish building creating gt video <{gt_path}> and pred video <{pred_path}> list.]")
     return pred_list, gt_list
 
 def read_frame_from_videos(vname):
@@ -299,12 +308,27 @@ def read_frame_from_videos(vname):
     for fr in fr_lst:
         image = cv2.imread(fr)
         image = Image.fromarray(cv2.cvtColor(image, cv2.COLOR_BGR2RGB))
+        frames.append(image)
     return frames  
 
 _to_tensors = transforms.Compose([
     Stack(),
     ToTorchFormatTensor()])
 
+def init_i3d_model():
+    global i3d_model
+    if i3d_model is not None:
+        return
+
+    print("[Loading I3D model for FID score ..]")
+    i3d_model_weight = './ckpt/i3d_rgb_imagenet.pt'
+    #if not os.path.exists(i3d_model_weight):
+    #    os.mkdir(os.path.dirname(i3d_model_weight))
+    #    urllib.request.urlretrieve('http://www.cmlab.csie.ntu.edu.tw/~zhe2325138/i3d_rgb_imagenet.pt', i3d_model_weight)
+    i3d_model = InceptionI3d(400, in_channels=3, final_endpoint='Logits')
+    i3d_model.load_state_dict(torch.load(i3d_model_weight))
+    i3d_model.to(torch.device('cuda:0'))
+    
 def get_i3d_activations(batched_video, target_endpoint='Logits', flatten=True, grad_enabled=False):
     """
     Get features from i3d model and flatten them to 1d feature,
@@ -338,12 +362,22 @@ def get_i3d_activations(batched_video, target_endpoint='Logits', flatten=True, g
 
     return feat
 
-def get_inpainting_metrics_video(src, tgt, logger, fid_test=True):
-    pred_list, gt_list = get_origin_inpainted_frame_list(src, tgt) # input -> ground truth
+def get_fid_score(real_activations, fake_activations):
+    """
+    Given two distribution of features, compute the FID score between them
+    """
+    m1 = np.mean(real_activations, axis=0)
+    m2 = np.mean(fake_activations, axis=0)
+    s1 = np.cov(real_activations, rowvar=False)
+    s2 = np.cov(fake_activations, rowvar=False)
+    return calculate_frechet_distance(m1, s1, m2, s2)
 
-    assert len(result_path) == len(gt_list), (len(result_path), len(gt_list)) # make sure the number of images is the same
+def get_inpainting_metrics_video(src, tgt, logger, device):
+    pred_list, gt_list = get_pred_gt_frame_list(src, tgt) # input -> ground truth
+
+    assert len(pred_list) == len(gt_list), (len(pred_list), len(gt_list)) # make sure the number of images is the same
     
-    video_num = len(frame_list) # number of videos
+    video_num = len(gt_list) # number of videos
 
     ssim_all, psnr_all, len_all = 0., 0., 0. 
     s_psnr_all = 0. 
@@ -353,17 +387,15 @@ def get_inpainting_metrics_video(src, tgt, logger, fid_test=True):
     real_i3d_activations = []
 
     for video_no in range(video_num):
-        print("[Processing: {}]".format(pred_list[video_no].split("/")[-1])) # print video name
-        gt_PIL = read_frame_from_videos(pred_list[video_no]) # read GT
-        pred_PIL = read_frame_from_videos(gt_list[video_no]) # read inpainted
+        gt_PIL = read_frame_from_videos(gt_list[video_no]) # read GT
+        pred_PIL = read_frame_from_videos(pred_list[video_no]) # read inpainted
         video_length = len(gt_PIL) # length of the video
+        print("[Processing: {}, len: {}]".format(pred_list[video_no].split("/")[-1], video_length)) # print video name
 
         ssim, psnr, s_psnr = 0., 0., 0. 
         for gt_img, pred_img in zip(gt_PIL, pred_PIL):
             gt_img = np.array(gt_img)
             pred_img = np.array(pred_img)
-            print(f"gt_img: {gt_img}") # test
-            print(f"pred_img: {pred_img}") # test
             ssim += measure.compare_ssim(gt_img, pred_img, data_range=255, multichannel=True, win_size=65)
             s_psnr += measure.compare_psnr(gt_img, pred_img, data_range=255)
 
@@ -377,11 +409,19 @@ def get_inpainting_metrics_video(src, tgt, logger, fid_test=True):
         preds = _to_tensors(pred_PIL).unsqueeze(0).to(device)
         real_i3d_activations.append(get_i3d_activations(gts).cpu().numpy().flatten())
         output_i3d_activations.append(get_i3d_activations(preds).cpu().numpy().flatten())
+        print(f"PSNR: {s_psnr/video_length}, SSIM: {ssim/video_length}, VFID: {get_fid_score(real_i3d_activations[-1], output_i3d_activations[-1])}") # test ") # test
     fid_score = get_fid_score(real_i3d_activations, output_i3d_activations)
-    print("[Finish evaluating, ssim is {}, psnr is {}]".format(ssim_all/video_length_all, s_psnr_all/video_length_all))
+    
+    ssim_final = ssim_all/video_length_all
+    s_psnr_final = s_psnr_all/video_length_all
+    print("[Finish evaluating, ssim is {}, psnr is {}]".format(ssim_final, s_psnr_final))
     print("[vfid score is {}]".format(fid_score))
+    
+    if logger is not None:
+        logger.info(
+                '\nPSNR:{0:.3f}, SSIM:{1:.3f}, vfid:{4:.3f}\n'.format(s_psnr_final, ssim_final, fid_score))
 
-    return {'psnr': s_psnr_all/video_length_all, 'ssim': ssim_all/video_length_all, 'vfid': fid_score}
+    return {'psnr': s_psnr_final, 'ssim': ssim_final, 'vfid': fid_score}
 
 
 if __name__ == "__main__":
