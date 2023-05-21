@@ -845,7 +845,7 @@ class TestDefaultInpaintingTrainingModule_video(unittest.TestCase):
 """
 Below is the code to test the evaluation function. Reference to FuseFormer
 """
-from src.utils import create_dir, Progbar
+from src.utils import create_dir, Progbar, SampleEdgeLineLogits_video
 
 class ZITS_video:
     def __init__(self, args, config, gpu, rank, test=False, single_img_test=False):
@@ -1109,6 +1109,66 @@ class ZITS_video:
             self.log(logs)
         return float(our_metric['psnr']), float(our_metric['ssim']), float(our_metric['vfid'])
 
+    def sample(self, it=None):
+        # do not sample when validation set is empty
+        if len(self.val_dataset) == 0:
+            return
+
+        self.inpaint_model.eval()
+        with torch.no_grad():
+            items = next(self.sample_iterator)
+            for k in items:
+                if type(items[k]) is torch.Tensor:
+                    items[k] = items[k].to(self.device)
+            b, t, _, _, _ = items['edges'].shape
+            edges_pred, lines_pred = SampleEdgeLineLogits_video(self.inpaint_model.transformer,
+                                                        context=[items['frames'][:b, ...].to(torch.float16),
+                                                                 items['edges'][:b, ...].to(torch.float16),
+                                                                 items['lines'][:b, ...].to(torch.float16)],
+                                                        masks=items['masks'][:b, ...].clone().to(torch.float16),
+                                                        iterations=5,
+                                                        add_v=0.05, mul_v=4,
+                                                        device=self.device)
+            edges_pred, lines_pred = edges_pred[:b, ...].detach().to(torch.float32), \
+                                   lines_pred[:b, ...].detach().to(torch.float32)
+            if self.config.fix_256 is None or self.config.fix_256 is False:
+                edges_pred = self.inpaint_model.structure_upsample(edge_preds)[0]
+                edges_pred = torch.sigmoid((edges_pred + 2) * 2)
+                lines_pred = self.inpaint_model.structure_upsample(lines_pred)[0]
+                lines_pred = torch.sigmoid((lines_pred + 2) * 2)
+            items['edges'][:b, ...] = edge_pred.detach()
+            items['lines'][:b, ...] = line_pred.detach()
+            # inpaint model
+            iteration = self.inpaint_model.iteration
+            inputs = (items['frames'] * (1 - items['masks']))
+            items = self.inpaint_model(items)
+            outputs_merged = (items['predicted_video'] * items['masks']) + (items['frames'] * (1 - items['masks']))
+
+        if it is not None:
+            iteration = it
+
+        image_per_row = 2
+        if self.config.SAMPLE_SIZE <= 6:
+            image_per_row = 1
+            
+        for t, ref_idx in enumerate(items['ref_index']):
+            images = stitch_images(
+                self.postprocess((items['frames'][:,t,...]).cpu()),
+                self.postprocess((inputs[:,t,...]).cpu()),
+                self.postprocess(items['edges'][:,t,...].cpu()),
+                self.postprocess(items['lines'][:,t,...].cpu()),
+                self.postprocess(items['masks'][:,t,...].cpu()),
+                self.postprocess((items['predicted_video'][:,t,...]).cpu()),
+                self.postprocess((outputs_merged[:,t,...]).cpu()),
+                img_per_row=image_per_row
+            )
+
+            path = os.path.join(self.samples_path, self.model_name)
+            name = os.path.join(path, str(iteration).zfill(6) + f"_{items['name']}_" + ref_idx)
+            create_dir(path)
+            print('\nsaving sample ' + name)
+            images.save(name)
+
     def log(self, logs):
         with open(self.log_file, 'a') as f:
             f.write('%s\n' % ' '.join([str(item[0]) + '\t' + str(item[1]) for item in logs]))
@@ -1133,6 +1193,7 @@ if __name__ == '__main__':
     args.world_size = 1
     config.world_size = 1
     
+    args.DDP = True
     model = ZITS_video(args, config, gpu, rank)
     model.train()
 

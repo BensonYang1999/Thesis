@@ -413,9 +413,8 @@ class EdgeLineGPT256RelBCE_video(nn.Module):
         edge, line = torch.split(x, [1, 1], dim=1)  # seperate the TSR outputs
 
         eps = 1e-8
-        loss = 0
-        edge_hole_loss, edge_valid_loss = 0, 0
-        line_hole_loss, line_valid_loss = 0, 0
+        loss, edge_hole_loss, edge_valid_loss, line_hole_loss, line_valid_loss = 0., 0., 0., 0., 0.
+        
         # Loss computing
         if edge_targets is not None and line_targets is not None:
             edge_targets = edge_targets.view(b * t, 1, h, w)
@@ -462,21 +461,23 @@ class EdgeLineGPT256RelBCE_video(nn.Module):
                                                              line_targets.permute(0, 2, 3, 1).contiguous().view(-1, 1),
                                                              reduction='none')
             
-            masks_ = masks.permute(0, 2, 3, 1).contiguous().view(-1, 1) # only compute the loss in the masked region
 
-            loss = (loss_edge+loss_line) * masks_
+            masks_ = masks.permute(0, 2, 3, 1).contiguous().view(-1, 1) # only compute the loss in the masked region
+            loss = ((loss_edge+loss_line) * masks_)*self.opts.loss_hole_valid_weight[0] + \
+                   ((loss_edge+loss_line) * (1-masks_))*self.opts.loss_hole_valid_weight[1]
             # print(f"loss shape: {loss.size()}") # test
             loss = torch.mean(loss)
+            
+            edge_hole_loss = (loss_edge*masks_)*self.opts.loss_hole_valid_weight[0]
+            edge_valid_loss = (loss_edge*(1-masks_))*self.opts.loss_hole_valid_weight[1]
+            line_hole_loss = (loss_line*masks_)*self.opts.loss_hole_valid_weight[0]
+            line_valid_loss = (loss_line*(1-masks_))*self.opts.loss_hole_valid_weight[1]
         else:
             loss = 0
 
         edge, line = edge.view(b, t, 1, h, w), line.view(b, t, 1, h, w)
         edge, line = self.act_last(edge), self.act_last(line)  # sigmoid activate 
 
-        edge_hole_loss = (loss_edge*masks_)*self.opts.loss_weight[0]
-        edge_valid_loss = (loss_edge*(1-masks_))*self.opts.loss_weight[1]
-        line_hole_loss = (loss_line*masks_)*self.opts.loss_weight[0]
-        line_valid_loss = (loss_line*(1-masks_))*self.opts.loss_weight[1]
         loss_detail = [edge_hole_loss, edge_valid_loss, line_hole_loss, line_valid_loss]
 
         return edge, line, loss, loss_detail

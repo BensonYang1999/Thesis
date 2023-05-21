@@ -313,55 +313,55 @@ def SampleEdgeLineLogits(model, context, mask=None, iterations=1, device='cuda',
 
         return edge, line
     
-def SampleEdgeLineLogits_video(model, context, mask=None, iterations=1, device='cuda', add_v=0, mul_v=4):
-    [img, edge, line] = context
-    img = img.to(device)
-    edge = edge.to(device)
-    line = line.to(device)
-    mask = mask.to(device)
+def SampleEdgeLineLogits_video(model, context, masks=None, iterations=1, device='cuda', add_v=0, mul_v=4):
+    [frames, edges, lines] = context
+    frames = frames.to(device)
+    edges = edges.to(device)
+    lines = lines.to(device)
+    masks = masks.to(device)
 
-    img = img * (1 - mask)
-    edge = edge * (1 - mask)
-    line = line * (1 - mask)
+    # Now we assume that the first dimension of img, edge, line, and mask is the batch size
+    # and the second dimension is the time dimension.
+    # So we need to iterate over these dimensions.
+    batch_size, timesteps, _, _, _ = frames.shape
+
     model.eval()
     with torch.no_grad():
         for i in range(iterations):
-            edge_logits, line_logits = model.forward_with_logits(img, edge, line, masks=mask)
-            # edge_pred = torch.sigmoid(edge_logits)
-            # edge_pred = edge_logits  # had alreadly been sigmoid in FuseFormer block
-            # line_pred = torch.sigmoid((line_logits + add_v) * mul_v)
-            line_pred = (line_logits + add_v)*mul_v   # had alreadly been sigmoid in FuseFormer block
-            edge = edge + edge_pred * mask
-            edge[edge >= 0.25] = 1
-            edge[edge < 0.25] = 0
-            line = line + line_pred * mask
+            edges_logits, lines_logits = model.forward_with_logits(frames, edges, lines, masks=masks)
+            edges_pred = torch.sigmoid(edges_logits)
+            lines_pred = torch.sigmoid((lines_logits + add_v) * mul_v)
+            edges = edges + edges_pred * masks
+            edges[edges >= 0.25] = 1
+            edges[edges < 0.25] = 0
+            lines = lines + lines_pred * masks
 
+            t, _, h, w = edges_pred.shape
+            edges_pred = edges_pred.reshape(t, -1, 1)
+            lines_pred = lines_pred.reshape(t, -1, 1)
+            masks = masks.reshape(t, -1)
 
-            b, _, h, w = edge_pred.shape
-            edge_pred = edge_pred.reshape(b, -1, 1)
-            line_pred = line_pred.reshape(b, -1, 1)
-            mask = mask.reshape(b, -1)
+            edges_probs = torch.cat([1 - edges_pred, edges_pred], dim=-1)
+            lines_probs = torch.cat([1 - lines_pred, lines_pred], dim=-1)
+            edges_probs[:, :, 1] += 0.5
+            lines_probs[:, :, 1] += 0.5
+            edges_max_probs = edges_probs.max(dim=-1)[0] + (1 - masks) * (-100)
+            lines_max_probs = lines_probs.max(dim=-1)[0] + (1 - masks) * (-100)
 
-            edge_probs = torch.cat([1 - edge_pred, edge_pred], dim=-1)
-            line_probs = torch.cat([1 - line_pred, line_pred], dim=-1)
-            edge_probs[:, :, 1] += 0.5
-            line_probs[:, :, 1] += 0.5
-            edge_max_probs = edge_probs.max(dim=-1)[0] + (1 - mask) * (-100)
-            line_max_probs = line_probs.max(dim=-1)[0] + (1 - mask) * (-100)
+            indices = torch.sort(edges_max_probs + lines_max_probs, dim=-1, descending=True)[1]
 
-            indices = torch.sort(edge_max_probs + line_max_probs, dim=-1, descending=True)[1]
+            for ii in range(t):
+                keep = int((i + 1) / iterations * torch.sum(masks[ii, ...]))
 
-            for ii in range(b):
-                keep = int((i + 1) / iterations * torch.sum(mask[ii, ...]))
+                assert torch.sum(masks[ii][indices[ii, :keep]]) == keep, "Error!!!"
+                masks[ii][indices[ii, :keep]] = 0
 
-                assert torch.sum(mask[ii][indices[ii, :keep]]) == keep, "Error!!!"
-                mask[ii][indices[ii, :keep]] = 0
+            masks = masks.reshape(t, 1, h, w).unsqueeze(0)
+            edges = edges * (1 - masks)
+            lines = lines * (1 - masks)
 
-            mask = mask.reshape(b, 1, h, w)
-            edge = edge * (1 - mask)
-            line = line * (1 - mask)
+    return edges, lines
 
-        return edge, line
 
 
 def get_lr_schedule_with_warmup(optimizer, num_warmup_steps, milestone_step, gamma, last_epoch=-1):
