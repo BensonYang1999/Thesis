@@ -319,16 +319,31 @@ def SampleEdgeLineLogits_video(model, context, masks=None, iterations=1, device=
     edges = edges.to(device)
     lines = lines.to(device)
     masks = masks.to(device)
+    print(f"frames shape: {frames.shape}") # test
+    print(f"edges shape: {edges.shape}") # test
+    print(f"lines shape: {lines.shape}") # test
+    print(f"masks shape: {masks.shape}") # test
 
     # Now we assume that the first dimension of img, edge, line, and mask is the batch size
     # and the second dimension is the time dimension.
     # So we need to iterate over these dimensions.
-    batch_size, timesteps, _, _, _ = frames.shape
+    batch_size, timesteps, _, h, w = frames.shape
+    
+    # frames = frames.view(batch_size * timesteps, *frames.shape[2:])
+    # edges = edges.view(batch_size * timesteps, *edges.shape[2:])
+    # lines = lines.view(batch_size * timesteps, *lines.shape[2:])
 
     model.eval()
     with torch.no_grad():
         for i in range(iterations):
             edges_logits, lines_logits = model.forward_with_logits(frames, edges, lines, masks=masks)
+            
+            edges_logits = edges_logits.view(batch_size*timesteps, *edges_logits.shape[2:])
+            lines_logits = lines_logits.view(batch_size*timesteps, *lines_logits.shape[2:])
+            edges = edges.view(batch_size*timesteps, *edges.shape[2:])
+            lines = lines.view(batch_size*timesteps, *lines.shape[2:])
+            masks = masks.view(batch_size*timesteps, *masks.shape[2:])
+            
             edges_pred = torch.sigmoid(edges_logits)
             lines_pred = torch.sigmoid((lines_logits + add_v) * mul_v)
             edges = edges + edges_pred * masks
@@ -356,7 +371,9 @@ def SampleEdgeLineLogits_video(model, context, masks=None, iterations=1, device=
                 assert torch.sum(masks[ii][indices[ii, :keep]]) == keep, "Error!!!"
                 masks[ii][indices[ii, :keep]] = 0
 
-            masks = masks.reshape(t, 1, h, w).unsqueeze(0)
+            masks = masks.view(batch_size, timesteps, 1, h, w)
+            edges = edges.view(batch_size, timesteps, 1, h, w)
+            lines = lines.view(batch_size, timesteps, 1, h, w)
             edges = edges * (1 - masks)
             lines = lines * (1 - masks)
 

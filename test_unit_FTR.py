@@ -138,7 +138,7 @@ class ToLongTensorFromNumpy(object):
 
 class DynamicDataset_video(torch.utils.data.Dataset):
     def __init__(self, split='train', name='YouTubeVOS', root='./datasets', batch_size=1, add_pos=False, pos_num=128, test_mask_path=None,
-                 input_size=None, default_size=256, str_size=256,
+                 input_size=None, default_size=(432, 240), str_size=256,
                  world_size=1,
                  round=1, sample=5): 
         # super(DynamicDataset, self).__init__()
@@ -239,14 +239,15 @@ class DynamicDataset_video(torch.utils.data.Dataset):
         return os.path.basename(name)
 
     def load_item(self, index):
-        if type(self.input_size) == list:
-            maped_idx = self.idx_map[index]
-            if maped_idx > len(self.input_size) - 1:
-                size = 512
-            else:
-                size = self.input_size[maped_idx]
-        else:
-            size = self.input_size
+        # if type(self.input_size) == list:
+        #     maped_idx = self.idx_map[index]
+        #     if maped_idx > len(self.input_size) - 1:
+        #         size = 512
+        #     else:
+        #         size = self.input_size[maped_idx]
+        # else:
+        #     size = self.input_size
+        size = self.input_size
 
         video_name = self.video_name[index]
         edge_name = self.edge_names[index]
@@ -255,26 +256,19 @@ class DynamicDataset_video(torch.utils.data.Dataset):
         all_edges = [os.path.join(edge_name, name) for name in sorted(os.listdir(edge_name))]
         all_lines = [os.path.join(line_name, name) for name in sorted(os.listdir(line_name))]
         all_masks = create_random_shape_with_random_motion(
-            len(all_frames), imageHeight=size, imageWidth=size)
+            len(all_frames), imageHeight=self.input_size[1], imageWidth=self.input_size[0])
         ref_index = self.get_ref_index(len(all_frames), self.sample_length)
         
-        frames, frames_256 = [], []
-        edges, edges_256 = [], []
-        lines, lines_256 = [], []
-        masks, masks_256 = [], []
+        frames, edges, lines, masks = [], [], [], []
         for idx in ref_index:
             # load image
             img = Image.open(all_frames[idx]).convert('RGB')
-            img = img.resize((size, size))
-            img_256 = img.resize((self.str_size, self.str_size))
+            img = img.resize(size)
             frames.append(img)
-            frames_256.append(img_256)
 
             # # load mask
             mask = all_masks[idx]
-            mask_256 = mask.resize((self.str_size, self.str_size))
             masks.append(mask)
-            masks_256.append(mask_256)
             # mask = Image.open(all_masks[idx]).convert('L')
             # mask = mask.resize(self.input_size)
             # mask_small = mask.resize((self.str_size, self.str_size))
@@ -284,17 +278,13 @@ class DynamicDataset_video(torch.utils.data.Dataset):
 
             # load edge
             egde = Image.open(all_edges[idx]).convert('L')
-            egde = egde.resize((size, size))
-            egde_256 = egde.resize((self.str_size, self.str_size))
+            egde = egde.resize(size)
             edges.append(egde)
-            edges_256.append(egde_256)
 
             # load line
             line = Image.open(all_lines[idx]).convert('L')
-            line = line.resize((size, size))
-            line_256 = line.resize((self.str_size, self.str_size))
+            line = line.resize(size)
             lines.append(line)
-            lines_256.append(line_256)
 
         # augment data
         if self.split == 'train':
@@ -305,15 +295,15 @@ class DynamicDataset_video(torch.utils.data.Dataset):
             # masks = GroupRandomHorizontalFlip()(masks, prob)
 
         batch = dict()
-        batch['frames'] = self._to_tensors(frames)
-        batch['frames_256'] = self._to_tensors(frames_256)*2.0 - 1.0 # normalize to [-1, 1]
+        batch['frames'] = self._to_tensors(frames) # normalize to [-1, 1]
+        # batch['frames_256'] = self._to_tensors(frames_256)*2.0 - 1.0 # normalize to [-1, 1]
         batch['masks'] = self._to_tensors(masks)
-        batch['masks_256'] = self._to_tensors(masks_256)
+        # batch['masks_256'] = self._to_tensors(masks_256)
         batch['edges'] = self._to_tensors(edges)
-        batch['edges_256'] = self._to_tensors(edges_256)
+        # batch['edges_256'] = self._to_tensors(edges_256)
         batch['lines'] = self._to_tensors(lines)
-        batch['lines_256'] = self._to_tensors(lines_256)
-        batch['size_ratio'] = size / self.default_size
+        # batch['lines_256'] = self._to_tensors(lines_256)
+        batch['size_ratio'] = size[0] / self.default_size[0]
 
         batch['name'] = self.load_name(index)
         batch['idxs'] = [all_frames[idx].split('/')[-1] for idx in ref_index]
@@ -348,7 +338,8 @@ class DynamicDataset_video(torch.utils.data.Dataset):
         ori_mask = mask.copy()
         ori_h, ori_w = ori_mask.shape[0:2] # original size
         ori_mask = ori_mask / 255
-        mask = cv2.resize(mask, (self.str_size, self.str_size), interpolation=cv2.INTER_AREA)
+        # mask = cv2.resize(mask, (self.str_size, self.str_size), interpolation=cv2.INTER_AREA)
+        mask = cv2.resize(mask, self.input_size, interpolation=cv2.INTER_AREA)
         mask[mask > 0] = 255 # make sure the mask is binary
         h, w = mask.shape[0:2] # resized size
         mask3 = mask.copy() 
@@ -845,7 +836,7 @@ class TestDefaultInpaintingTrainingModule_video(unittest.TestCase):
 """
 Below is the code to test the evaluation function. Reference to FuseFormer
 """
-from src.utils import create_dir, Progbar, SampleEdgeLineLogits_video
+from src.utils import create_dir, Progbar, SampleEdgeLineLogits_video, stitch_images
 
 class ZITS_video:
     def __init__(self, args, config, gpu, rank, test=False, single_img_test=False):
@@ -967,28 +958,29 @@ class ZITS_video:
                                     (int(self.config.Turning_Point) - int(self.config.MIX_ITERS))
                         b = np.clip(int(pred_rate * b), 2, b)
                     iteration_num_for_pred = int(random.random() * 5) + 1
+                    print(f"input shape: {items['frames'].shape}")
                     edge_pred, line_pred = SampleEdgeLineLogits(self.inpaint_model.transformer,
-                                                                context=[items['frames_256'][:b, ...],
-                                                                        items['edges_256'][:b, ...],
-                                                                        items['lines_256'][:b, ...]],
-                                                                mask=items['masks_256'][:b, ...].clone(),
+                                                                context=[items['frames'][:b, ...],
+                                                                        items['edges'][:b, ...],
+                                                                        items['lines'][:b, ...]],
+                                                                mask=items['masks'][:b, ...].clone(),
                                                                 iterations=iteration_num_for_pred,
                                                                 add_v=0.05, mul_v=4)
                     edge_pred = edge_pred.detach().to(torch.float32)
                     line_pred = line_pred.detach().to(torch.float32)
-                    if self.config.fix_256 is None or self.config.fix_256 is False:
-                        if image_size < 300 and random.random() < 0.5:
-                            edge_pred = F.interpolate(edge_pred, size=(image_size, image_size), mode='nearest')
-                            line_pred = F.interpolate(line_pred, size=(image_size, image_size), mode='nearest')
-                        else:
-                            edge_pred = self.inpaint_model.structure_upsample(edge_pred)[0]
-                            edge_pred = torch.sigmoid((edge_pred + random_add_v) * random_mul_v)
-                            edge_pred = F.interpolate(edge_pred, size=(image_size, image_size), mode='bilinear',
-                                                    align_corners=False)
-                            line_pred = self.inpaint_model.structure_upsample(line_pred)[0]
-                            line_pred = torch.sigmoid((line_pred + random_add_v) * random_mul_v)
-                            line_pred = F.interpolate(line_pred, size=(image_size, image_size), mode='bilinear',
-                                                    align_corners=False)
+                    # if self.config.fix_256 is None or self.config.fix_256 is False:
+                    #     if image_size < 300 and random.random() < 0.5:
+                    #         edge_pred = F.interpolate(edge_pred, size=(image_size, image_size), mode='nearest')
+                    #         line_pred = F.interpolate(line_pred, size=(image_size, image_size), mode='nearest')
+                    #     else:
+                    #         edge_pred = self.inpaint_model.structure_upsample(edge_pred)[0]
+                    #         edge_pred = torch.sigmoid((edge_pred + random_add_v) * random_mul_v)
+                    #         edge_pred = F.interpolate(edge_pred, size=(image_size, image_size), mode='bilinear',
+                    #                                 align_corners=False)
+                    #         line_pred = self.inpaint_model.structure_upsample(line_pred)[0]
+                    #         line_pred = torch.sigmoid((line_pred + random_add_v) * random_mul_v)
+                    #         line_pred = F.interpolate(line_pred, size=(image_size, image_size), mode='bilinear',
+                    #                                 align_corners=False)
                     for i in range(t):  # handle each frame for time dimension
                         items['edge'][:b, i, ...] = edge_pred.detach()
                         items['line'][:b, i, ...] = line_pred.detach()
@@ -1079,11 +1071,11 @@ class ZITS_video:
                 edge_pred, line_pred = self.inpaint_model.transformer.forward_with_logits(img_idx=items['frames'], \
                                                           edge_idx=items['edges'], line_idx=items['lines'], masks=items['masks'])
                 edge_pred, line_pred = edge_pred.detach().to(torch.float32), line_pred.detach().to(torch.float32)
-                if self.config.fix_256 is None or self.config.fix_256 is False:
-                    edge_pred = self.inpaint_model.structure_upsample(edge_pred)[0]
-                    edge_pred = torch.sigmoid((edge_pred + 2) * 2)
-                    line_pred = self.inpaint_model.structure_upsample(line_pred)[0]
-                    line_pred = torch.sigmoid((line_pred + 2) * 2)
+                # if self.config.fix_256 is None or self.config.fix_256 is False:
+                #     edge_pred = self.inpaint_model.structure_upsample(edge_pred)[0]
+                #     edge_pred = torch.sigmoid((edge_pred + 2) * 2)
+                #     line_pred = self.inpaint_model.structure_upsample(line_pred)[0]
+                #     line_pred = torch.sigmoid((line_pred + 2) * 2)
                 # items['edge'][:b, ...] = edge_pred.detach()
                 # items['line'][:b, ...] = line_pred.detach()
                 items['edges'] = edge_pred.detach() # the inpainted edges
@@ -1131,13 +1123,13 @@ class ZITS_video:
                                                         device=self.device)
             edges_pred, lines_pred = edges_pred[:b, ...].detach().to(torch.float32), \
                                    lines_pred[:b, ...].detach().to(torch.float32)
-            if self.config.fix_256 is None or self.config.fix_256 is False:
-                edges_pred = self.inpaint_model.structure_upsample(edge_preds)[0]
-                edges_pred = torch.sigmoid((edges_pred + 2) * 2)
-                lines_pred = self.inpaint_model.structure_upsample(lines_pred)[0]
-                lines_pred = torch.sigmoid((lines_pred + 2) * 2)
-            items['edges'][:b, ...] = edge_pred.detach()
-            items['lines'][:b, ...] = line_pred.detach()
+            # if self.config.fix_256 is None or self.config.fix_256 is False:
+            #     edges_pred = self.inpaint_model.structure_upsample(edge_preds)[0]
+            #     edges_pred = torch.sigmoid((edges_pred + 2) * 2)
+            #     lines_pred = self.inpaint_model.structure_upsample(lines_pred)[0]
+            #     lines_pred = torch.sigmoid((lines_pred + 2) * 2)
+            items['edges'][:b, ...] = edges_pred.detach()
+            items['lines'][:b, ...] = lines_pred.detach()
             # inpaint model
             iteration = self.inpaint_model.iteration
             inputs = (items['frames'] * (1 - items['masks']))
@@ -1151,7 +1143,9 @@ class ZITS_video:
         if self.config.SAMPLE_SIZE <= 6:
             image_per_row = 1
             
-        for t, ref_idx in enumerate(items['ref_index']):
+        print(f"items['frames'] shape: {items['frames'].shape}") # test
+        print(f"outputs_merged shape: {outputs_merged.shape}") # test
+        for t in range(items['frames'].shape[1]):            
             images = stitch_images(
                 self.postprocess((items['frames'][:,t,...]).cpu()),
                 self.postprocess((inputs[:,t,...]).cpu()),
@@ -1164,7 +1158,8 @@ class ZITS_video:
             )
 
             path = os.path.join(self.samples_path, self.model_name)
-            name = os.path.join(path, str(iteration).zfill(6) + f"_{items['name']}_" + ref_idx)
+            print(f"path: {path}") # test
+            name = os.path.join(path, str(iteration).zfill(6) + f"_timestep{t}.jpg")
             create_dir(path)
             print('\nsaving sample ' + name)
             images.save(name)
@@ -1188,7 +1183,7 @@ if __name__ == '__main__':
     # print(get_inpainting_metrics_video(src='datasets/YouTubeVOS/test_all_frames/JPEGImages/', tgt='datasets/YouTubeVOS/test_all_frames/JPEGImages/', logger=None, device="cuda"))
     config_path = './config_list/config_ZITS_video.yml'
     config = Config(config_path)
-    gpu = "cuda"
+    gpu = "cuda:0"
     rank = 0 
     args.world_size = 1
     config.world_size = 1
@@ -1243,30 +1238,30 @@ if __name__ == '__main__':
 #         # combined_rel = torch.cat(rel_pos.unbind(dim=2), dim=1)  # unbind along the third dimension (dim=2), then concatenate along the second dimension (dim=1)
 #         # combined_abs = torch.cat(abs_pos.unbind(dim=2), dim=1)
         
-#         # save_image(combined, f'combined_image_{i}.png')
-#         # save_image(combined_mask, f'combined_mask_{i}.png')
-#         # save_image(combined_edge, f'combined_edge_{i}.png')
-#         # save_image(combined_line, f'combined_line_{i}.png')
-#         # combined_rel = combined_rel.float()  # Convert to float tensor
-#         # combined_rel = (combined_rel - combined_rel.min()) / (combined_rel.max() - combined_rel.min())  # Normalize to [0, 1]
-#         # save_image(combined_rel, f'combined_rel_{i}.png')
-#         # combined_abs = combined_abs.float()  # Convert to float tensor
-#         # combined_abs = (combined_abs - combined_abs.min()) / (combined_abs.max() - combined_abs.min())  # Normalize to [0, 1]
-#         # save_image(combined_abs, f'combined_abs_{i}.png')
+#         save_image(combined, f'combined_image_{i}.png')
+#         save_image(combined_mask, f'combined_mask_{i}.png')
+#         save_image(combined_edge, f'combined_edge_{i}.png')
+#         save_image(combined_line, f'combined_line_{i}.png')
+#         combined_rel = combined_rel.float()  # Convert to float tensor
+#         combined_rel = (combined_rel - combined_rel.min()) / (combined_rel.max() - combined_rel.min())  # Normalize to [0, 1]
+#         save_image(combined_rel, f'combined_rel_{i}.png')
+#         combined_abs = combined_abs.float()  # Convert to float tensor
+#         combined_abs = (combined_abs - combined_abs.min()) / (combined_abs.max() - combined_abs.min())  # Normalize to [0, 1]
+#         save_image(combined_abs, f'combined_abs_{i}.png')
         
-#         # # Let's assume tensor is your 4D tensor with shape [256, 256, 5, 4]
-#         # direct = direct.permute(2, 3, 0, 1)  # Change the shape to [5, 4, 256, 256]
-#         # direct = direct.reshape(-1, 256, 256)  # Flatten the first two dimensions, new shape is [20, 256, 256]
+#         # Let's assume tensor is your 4D tensor with shape [256, 256, 5, 4]
+#         direct = direct[0].permute(0, 3, 1, 2)  # Change the shape to [5, 4, 256, 256]
+#         direct = direct.reshape(-1, 240, 432)  # Flatten the first two dimensions, new shape is [20, 256, 256]
 
-#         # # Now, we need to add a dimension for channels, because make_grid and save_image expect tensors in the shape (C, H, W) or (B, C, H, W)
-#         # direct = direct.unsqueeze(1)  # New shape is [20, 1, 256, 256]
+#         # Now, we need to add a dimension for channels, because make_grid and save_image expect tensors in the shape (C, H, W) or (B, C, H, W)
+#         direct = direct.unsqueeze(1)  # New shape is [20, 1, 256, 256]
 
-#         # grid = make_grid(direct, nrow=4)  # Arrange images into a grid with 4 images per row
+#         grid = make_grid(direct, nrow=4)  # Arrange images into a grid with 4 images per row
 
-#         # # Normalize to [0, 1] and save
-#         # grid = (grid - grid.min()) / (grid.max() - grid.min())
-#         # save_image(grid, f'grid_{i}.png')
+#         # Normalize to [0, 1] and save
+#         grid = (grid - grid.min()) / (grid.max() - grid.min())
+#         save_image(grid, f'grid_{i}.png')
         
 
-#     #  test DefaultInpaintingTrainingModule_video
+# #     #  test DefaultInpaintingTrainingModule_video
     
