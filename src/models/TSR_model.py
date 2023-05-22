@@ -387,6 +387,8 @@ class EdgeLineGPT256RelBCE_video(nn.Module):
         # input [50, 256, 32, 32] -> original ZITS
         # input [1, 5, 3, 240, 432] -> original fuseformer
         # print(f"shape before FuseFormer: {x.shape}")  # test
+        # add the learned resize layer for x
+        
         x = self.fuseformerBlock(x)
         # print(f"shape after FuseFormer: {x.shape}")  # test
 
@@ -506,7 +508,7 @@ class EdgeLineGPT256RelBCE_video(nn.Module):
         x = self.fuseformerBlock(x)
         
         edge, line = torch.split(x, [1, 1], dim=1)  # seperate the TSR outputs
-        edge, line = edge.squeeze(0), line.squeeze(0)
-        edge, line = edge.view(t, 1, h, w), line.view(t, 1, h, w)
+        # edge, line = edge.squeeze(0), line.squeeze(0)
+        edge, line = edge.view(b, t, 1, h, w), line.view(b, t, 1, h, w)
 
         return edge, line

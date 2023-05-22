@@ -754,6 +754,7 @@ from src.models.LaMa import *
 import argparse
 
 parser = argparse.ArgumentParser()
+parser.add_argument('--model_name', type=str, default='ZITS_video', help='the name of this model')
 parser.add_argument('--path', '--checkpoints', type=str, default=None,
                     help='model checkpoints path (default: ./checkpoints)')
 parser.add_argument('--config_file', type=str, default='./config_list/config_LAMA_MPE_HR.yml',
@@ -784,7 +785,9 @@ class TestDefaultInpaintingTrainingModule_video(unittest.TestCase):
     def setUp(self):
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-        config = Config('./config_list/config_ZITS_video.yml')
+
+        config = Config(f'./ckpt/{model_name}/config_ZITS_video.yml')
+        config.training_model.net = args.model_name
         self.model = DefaultInpaintingTrainingModule_video(args=args, config=config, gpu=0, rank=0, test=False).to(device)
 
         # self.batch = {
@@ -844,7 +847,8 @@ class ZITS_video:
         self.device = gpu
         self.global_rank = rank
 
-        self.model_name = 'inpaint' # this final RGB video inpainting model name
+        # self.model_name = 'inpaint' # this final RGB video inpainting model name
+        self.model_name = args.model_name
 
         kwargs = dict(config.training_model)
         kwargs.pop('kind')
@@ -1143,24 +1147,20 @@ class ZITS_video:
         if self.config.SAMPLE_SIZE <= 6:
             image_per_row = 1
             
-        print(f"items['frames'] shape: {items['frames'].shape}") # test
-        print(f"outputs_merged shape: {outputs_merged.shape}") # test
-        for t in range(items['frames'].shape[1]):            
+        for b in range(items['frames'].shape[0]):            
             images = stitch_images(
-                self.postprocess((items['frames'][:,t,...]).cpu()),
-                self.postprocess((inputs[:,t,...]).cpu()),
-                self.postprocess(items['edges'][:,t,...].cpu()),
-                self.postprocess(items['lines'][:,t,...].cpu()),
-                self.postprocess(items['masks'][:,t,...].cpu()),
-                self.postprocess((items['predicted_video'][:,t,...]).cpu()),
-                self.postprocess((outputs_merged[:,t,...]).cpu()),
+                self.postprocess((items['frames'][b,:,...]).cpu()),
+                self.postprocess((inputs[b,:,...]).cpu()),
+                self.postprocess(items['edges'][b,:,...].cpu()),
+                self.postprocess(items['lines'][b,:,...].cpu()),
+                self.postprocess(items['masks'][b,:,...].cpu()),
+                self.postprocess((items['predicted_video'][b,:,...]).cpu()),
+                self.postprocess((outputs_merged[b,:,...]).cpu()),
                 img_per_row=image_per_row
             )
 
-            path = os.path.join(self.samples_path, self.model_name)
-            print(f"path: {path}") # test
-            name = os.path.join(path, str(iteration).zfill(6) + f"_timestep{t}.jpg")
-            create_dir(path)
+            name = os.path.join(self.samples_path, str(iteration).zfill(6) + f"batch{b}.jpg")
+            create_dir(self.samples_path)
             print('\nsaving sample ' + name)
             images.save(name)
 
@@ -1181,8 +1181,10 @@ if __name__ == '__main__':
     # test the ZITS_video train function
     # from src.inpainting_metrics import get_inpainting_metrics_video
     # print(get_inpainting_metrics_video(src='datasets/YouTubeVOS/test_all_frames/JPEGImages/', tgt='datasets/YouTubeVOS/test_all_frames/JPEGImages/', logger=None, device="cuda"))
-    config_path = './config_list/config_ZITS_video.yml'
-    config = Config(config_path)
+    config = Config(f'./config_list/config_{args.model_name}.yml')
+    config.training_model['net'] = args.model_name
+    # config_path = './config_list/config_ZITS_video.yml'
+    # config = Config(config_path)
     gpu = "cuda:0"
     rank = 0 
     args.world_size = 1

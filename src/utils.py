@@ -70,7 +70,8 @@ def stitch_images(inputs, *outputs, img_per_row=2):
     gap = 5
     columns = len(outputs) + 1
 
-    width, height = inputs[0][:, :, 0].shape
+    # width, height = inputs[0][:, :, 0].shape
+    height, width = inputs[0][:, :, 0].shape
     img = Image.new('RGB',
                     (width * img_per_row * columns + gap * (img_per_row - 1), height * int(len(inputs) / img_per_row)))
     images = [inputs, *outputs]
@@ -319,19 +320,11 @@ def SampleEdgeLineLogits_video(model, context, masks=None, iterations=1, device=
     edges = edges.to(device)
     lines = lines.to(device)
     masks = masks.to(device)
-    print(f"frames shape: {frames.shape}") # test
-    print(f"edges shape: {edges.shape}") # test
-    print(f"lines shape: {lines.shape}") # test
-    print(f"masks shape: {masks.shape}") # test
 
     # Now we assume that the first dimension of img, edge, line, and mask is the batch size
     # and the second dimension is the time dimension.
     # So we need to iterate over these dimensions.
     batch_size, timesteps, _, h, w = frames.shape
-    
-    # frames = frames.view(batch_size * timesteps, *frames.shape[2:])
-    # edges = edges.view(batch_size * timesteps, *edges.shape[2:])
-    # lines = lines.view(batch_size * timesteps, *lines.shape[2:])
 
     model.eval()
     with torch.no_grad():

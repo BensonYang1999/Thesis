@@ -8,7 +8,8 @@ class Config(dict):
         with open(config_path, 'r') as f:
             self._yaml = f.read()
             self._dict = yaml.load(self._yaml, Loader=yaml.FullLoader)
-            self._dict['PATH'] = os.path.dirname(config_path)
+            # self._dict['PATH'] = os.path.dirname(config_path)
+            self._dict['PATH'] = os.path.join("./ckpt", self._dict['training_model']['net'])
 
     def __getattr__(self, name):
         if self._dict.get(name) is not None:
