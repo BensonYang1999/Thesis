@@ -1,8 +1,8 @@
 import os
 
-from src.losses.adversarial import NonSaturatingWithR1
+from src.losses.adversarial import NonSaturatingWithR1, NonSaturatingWithR1_video_2D
 from src.losses.feature_matching import masked_l1_loss, feature_matching_loss
-from src.losses.perceptual import ResNetPL
+from src.losses.perceptual import ResNetPL, ResNetPL_video
 from src.models.LaMa import *
 from src.models.TSR_model import *
 from src.models.upsample import StructureUpsampling
@@ -311,6 +311,7 @@ class BaseInpaintingTrainingModule(nn.Module):
             make_optimizer(self.generator.parameters(), **self.config.optimizers['generator']),
             make_optimizer(discriminator_params, **self.config.optimizers['discriminator'])
         ]
+
 
 class BaseInpaintingTrainingModule_video(nn.Module):
     def __init__(self, config, gpu, name, rank, args, test=False, **kwargs):
@@ -726,6 +727,7 @@ class DefaultInpaintingTrainingModule(BaseInpaintingTrainingModule):
         metrics['grad_penalty'] = grad_penalty.mean().item()
 
         return total_loss.item(), batch, metrics
+
 
 class DefaultInpaintingTrainingModule_video(BaseInpaintingTrainingModule_video):
     def __init__(self, args, config, gpu, rank, video_to_discriminator='predicted_video', test=False, **kwargs):

@@ -752,16 +752,17 @@ import unittest
 from src.config import Config
 from src.models.LaMa import *
 import argparse
+from shutil import copyfile
 
 parser = argparse.ArgumentParser()
-parser.add_argument('--model_name', type=str, default='ZITS_video', help='the name of this model')
-parser.add_argument('--path', '--checkpoints', type=str, default=None,
+parser.add_argument('--model_name', type=str, default='ZITS_video_check', help='the name of this model')
+parser.add_argument('--path', '--checkpoints', type=str, default="./ckpt",
                     help='model checkpoints path (default: ./checkpoints)')
-parser.add_argument('--config_file', type=str, default='./config_list/config_LAMA_MPE_HR.yml',
+parser.add_argument('--config_file', type=str, default='./config_list/config_ZITS_video.yml',
                     help='The config file of each experiment ')
 parser.add_argument('--nodes', type=int, default=1, help='how many machines')
 parser.add_argument('--gpus', type=int, default=1, help='how many GPUs in one node')
-parser.add_argument('--GPU_ids', type=str, default='0')
+parser.add_argument('--GPU_ids', type=str, default='1')
 parser.add_argument('--node_rank', type=int, default=0, help='the id of this machine')
 parser.add_argument('--DDP', action='store_true', help='DDP')
 parser.add_argument('--lama', action='store_true', help='train the lama first')
@@ -779,6 +780,9 @@ parser.add_argument('--loss_edge_line_weight', type=float, nargs='+', default=[1
 # add the choice to decide the loss function with l1 or mse or binary cross entropy with choice
 parser.add_argument('--loss_choice', type=str, default="bce", help='the choice of loss function: l1, mse, bce')
 parser.add_argument('--edge_gaussian', type=int, default=0, help='the sigma of gaussian kernel for edge')
+parser.add_argument('--dataset', type=str, default="youtubevos")
+parser.add_argument('--input_size', type=tuple, default=(240,432))
+parser.add_argument("--neighbor_stride", type=int, default=1)
 args = parser.parse_args()
 
 class TestDefaultInpaintingTrainingModule_video(unittest.TestCase):
@@ -840,6 +844,26 @@ class TestDefaultInpaintingTrainingModule_video(unittest.TestCase):
 Below is the code to test the evaluation function. Reference to FuseFormer
 """
 from src.utils import create_dir, Progbar, SampleEdgeLineLogits_video, stitch_images
+from tqdm import tqdm
+from src.inpainting_metrics import *
+from src.utils import *
+import cv2
+
+from skimage.metrics import structural_similarity as measure_ssim
+from skimage.metrics import peak_signal_noise_ratio as measure_psnr
+
+_to_tensors = transforms.Compose([
+    Stack(),
+    ToTorchFormatTensor(), ])
+
+def get_ref_index(length, sample_length):
+        if random.uniform(0, 1) > 0.5:
+            ref_index = random.sample(range(length), sample_length)
+            ref_index.sort()
+        else:
+            pivot = random.randint(0, length-sample_length)
+            ref_index = [pivot+i for i in range(sample_length)]
+        return ref_index
 
 class ZITS_video:
     def __init__(self, args, config, gpu, rank, test=False, single_img_test=False):
@@ -854,6 +878,12 @@ class ZITS_video:
         kwargs.pop('kind')
 
         self.inpaint_model = DefaultInpaintingTrainingModule_video(args, config, gpu=gpu, rank=rank, test=test, **kwargs).to(gpu) 
+        self.input_size = args.input_size
+        self.w, self.h = args.input_size 
+        self.neighbor_stride = args.neighbor_stride
+        self.sample_length = args.ref_frame_num
+        self.pos_num = config.rel_pos_num
+        self.str_size = config.str_size
 
         if config.min_sigma is None:
             min_sigma = 2.0
@@ -902,6 +932,7 @@ class ZITS_video:
             self.sample_iterator = self.val_dataset.create_iterator(config.SAMPLE_SIZE)
             self.val_path = os.path.join(config.PATH, 'validation')
             create_dir(self.val_path)
+
 
     def save(self):
         if self.global_rank == 0:
@@ -954,7 +985,7 @@ class ZITS_video:
                 random_add_v = random.random() * 1.5 + 1.5
                 random_mul_v = random.random() * 1.5 + 1.5  # [1.5~3]
 
-                # random mix the edge and line TODO
+                # random mix the edge and line
                 if iteration > int(self.config.MIX_ITERS):
                     b, t, _, _, _ = items['edges'].shape  # add time dimension
                     if int(self.config.MIX_ITERS) < iteration < int(self.config.Turning_Point):
@@ -962,33 +993,14 @@ class ZITS_video:
                                     (int(self.config.Turning_Point) - int(self.config.MIX_ITERS))
                         b = np.clip(int(pred_rate * b), 2, b)
                     iteration_num_for_pred = int(random.random() * 5) + 1
-                    print(f"input shape: {items['frames'].shape}")
-                    edge_pred, line_pred = SampleEdgeLineLogits(self.inpaint_model.transformer,
-                                                                context=[items['frames'][:b, ...],
-                                                                        items['edges'][:b, ...],
-                                                                        items['lines'][:b, ...]],
-                                                                mask=items['masks'][:b, ...].clone(),
-                                                                iterations=iteration_num_for_pred,
-                                                                add_v=0.05, mul_v=4)
+                    
+                    edge_pred, line_pred = SampleEdgeLineLogits_video(self.inpaint_model.transformer,
+                    context=[items['frames'][:b, ...].to(torch.float16), items['edges'][:b, ...].to(torch.float16), items['lines'][:b, ...].to(torch.float16)], 
+                    masks=items['masks'][:b, ...].to(torch.float16), iterations=iteration_num_for_pred, add_v=0.05, mul_v=4, device=self.device)   
                     edge_pred = edge_pred.detach().to(torch.float32)
                     line_pred = line_pred.detach().to(torch.float32)
-                    # if self.config.fix_256 is None or self.config.fix_256 is False:
-                    #     if image_size < 300 and random.random() < 0.5:
-                    #         edge_pred = F.interpolate(edge_pred, size=(image_size, image_size), mode='nearest')
-                    #         line_pred = F.interpolate(line_pred, size=(image_size, image_size), mode='nearest')
-                    #     else:
-                    #         edge_pred = self.inpaint_model.structure_upsample(edge_pred)[0]
-                    #         edge_pred = torch.sigmoid((edge_pred + random_add_v) * random_mul_v)
-                    #         edge_pred = F.interpolate(edge_pred, size=(image_size, image_size), mode='bilinear',
-                    #                                 align_corners=False)
-                    #         line_pred = self.inpaint_model.structure_upsample(line_pred)[0]
-                    #         line_pred = torch.sigmoid((line_pred + random_add_v) * random_mul_v)
-                    #         line_pred = F.interpolate(line_pred, size=(image_size, image_size), mode='bilinear',
-                    #                                 align_corners=False)
-                    for i in range(t):  # handle each frame for time dimension
-                        items['edge'][:b, i, ...] = edge_pred.detach()
-                        items['line'][:b, i, ...] = line_pred.detach()
-
+                    items['edges'] = edge_pred.detach()
+                    items['lines'] = line_pred.detach()
 
                 # train
                 outputs, gen_loss, dis_loss, logs, batch = self.inpaint_model.process(items)
@@ -1050,60 +1062,175 @@ class ZITS_video:
                 self.log(logs)
         print('\nEnd training....')
 
-    def eval():
-        val_loader = DataLoader(self.val_dataset, shuffle=False, pin_memory=True,
-                                batch_size=self.config.BATCH_SIZE, num_workers=12)
+    def eval(self):
+        # val_loader = DataLoader(self.val_dataset, shuffle=False, pin_memory=True,
+        #                         batch_size=self.config.BATCH_SIZE, num_workers=12)
 
         self.inpaint_model.eval()  # set model to eval mode
 
-        with torch.no_grad(): 
-            for items in tqdm(val_loader):
-                for k in items:
-                    if type(items[k]) is torch.Tensor:
-                        items[k] = items[k].to(self.device)
-                b, t, _, _, _ = items['edges'].shape
-                # edge_pred, line_pred = SampleEdgeLineLogits_video(self.inpaint_model.transformer,
-                #                                             context=[items['img_256'][:b, ...],
-                #                                                         items['edge_256'][:b, ...],
-                #                                                         items['line_256'][:b, ...]],
-                #                                             mask=items['mask_256'][:b, ...].clone(),
-                #                                             iterations=5,
-                #                                             add_v=0.05, mul_v=4,
-                #                                             device=self.device)
-                # edge_pred, line_pred = edge_pred[:b, ...].detach().to(torch.float32), \
-                #                         line_pred[:b, ...].detach().to(torch.float32)
-                edge_pred, line_pred = self.inpaint_model.transformer.forward_with_logits(img_idx=items['frames'], \
-                                                          edge_idx=items['edges'], line_idx=items['lines'], masks=items['masks'])
-                edge_pred, line_pred = edge_pred.detach().to(torch.float32), line_pred.detach().to(torch.float32)
-                # if self.config.fix_256 is None or self.config.fix_256 is False:
-                #     edge_pred = self.inpaint_model.structure_upsample(edge_pred)[0]
-                #     edge_pred = torch.sigmoid((edge_pred + 2) * 2)
-                #     line_pred = self.inpaint_model.structure_upsample(line_pred)[0]
-                #     line_pred = torch.sigmoid((line_pred + 2) * 2)
-                # items['edge'][:b, ...] = edge_pred.detach()
-                # items['line'][:b, ...] = line_pred.detach()
-                items['edges'] = edge_pred.detach() # the inpainted edges
-                items['lines'] = line_pred.detach() # # the inpainted lines
-                # eval
-                items = self.inpaint_model(items)
-                outputs_merged = (items['predicted_image'] * items['mask']) + (items['image'] * (1 - items['mask']))
-                # TODO
-                # save
-                outputs_merged *= 255.0
-                outputs_merged = outputs_merged.permute(0, 2, 3, 1).int().cpu().numpy()
-                for img_num in range(b):
-                    cv2.imwrite(self.val_path + '/' + items['name'][img_num], outputs_merged[img_num, :, :, ::-1])
+        frame_list, mask_list, edge_list, line_list = get_frame_mask_edge_line_list(args) # get frame and mask list
+        assert len(frame_list) == len(mask_list) # check if the number of frames and masks are the same
+        print(len(frame_list))
+        print(len(mask_list))
+        video_num = len(frame_list) # number of videos
 
-        our_metric = get_inpainting_metrics_video(self.val_path, self.config.GT_Val_FOLDER, logger=None, device=self.device) # video version
+        ssim_all, psnr_all, len_all = 0., 0., 0. 
+        s_psnr_all = 0. 
+        video_length_all = 0 
+        vfid = 0.
+        output_i3d_activations = []
+        real_i3d_activations = []
+
+        for video_no in tqdm(range(video_num)): # iterate over all videos
+            video_name = frame_list[video_no].split("/")[-1]
+            print("[Processing: {}]".format(video_name)) # print video name
+            print(video_no) # print video number
+
+            save_result_dir = os.path.join(self.val_path, frame_list[video_no].split("/")[-1]) # save result directory
+            if not os.path.exists(save_result_dir):
+                os.makedirs(save_result_dir)
+
+            frames_PIL, idx_lst = read_frame_from_videos(frame_list[video_no], self.w, self.h) # read frames from video
+            video_length = len(frames_PIL) # get video length, how many frames in this video
+            imgs = _to_tensors(frames_PIL).unsqueeze(0)*2-1 # convert frames to tensors and normalize to [-1, 1]
+            frames = [np.array(f).astype(np.uint8) for f in frames_PIL] # convert frames to numpy array
+
+            masks = read_mask(mask_list[video_no], self.w, self.h)    
+            binary_masks = [np.expand_dims((np.array(m) != 0).astype(np.uint8), 2) for m in masks] # convert masks to numpy array
+            masks = _to_tensors(masks).unsqueeze(0) # convert masks to tensors
+
+            edges, lines = read_edge_line_PIL(edge_list[video_no], line_list[video_no], self.w, self.h)
+            edges = _to_tensors(edges).unsqueeze(0)
+            lines = _to_tensors(lines).unsqueeze(0)
+        
+            comp_frames = [None]*video_length # initialize completed frames
+
+            for f in range(0, video_length, self.neighbor_stride): # iterate over all frames in this video, neighbor_stride=5
+                # FuseFormer version
+                # neighbor_ids = [i for i in range(max(0, f-self.neighbor_stride), min(video_length, f+self.neighbor_stride+1))] # get neighbor frames
+                # ref_ids = get_ref_index(f, neighbor_ids, video_length) # get reference frames, approximate the whole story of the video
+                # len_temp = len(neighbor_ids) + len(ref_ids) # get the number of frames used for inpainting
+                # selected_imgs = imgs[:1, neighbor_ids+ref_ids, :, :, :] # select frames for inpainting with neighbor frames and reference frames
+                # selected_masks = masks[:1, neighbor_ids+ref_ids, :, :, :] # select masks for inpainting 
+                # selected_edges = edges[:1, neighbor_ids+ref_ids, :, :, :]
+                # selected_lines = lines[:1, neighbor_ids+ref_ids, :, :, :]
+
+                # ZITS version of seleting reference frames
+                neighbor_ids = get_ref_index(video_length, self.sample_length)
+                selected_imgs = imgs[:1, neighbor_ids, :, :, :] # select frames for inpainting with neighbor frames and reference frames
+                selected_masks = masks[:1, neighbor_ids, :, :, :] # select masks for inpainting 
+                selected_edges = edges[:1, neighbor_ids, :, :, :]
+                selected_lines = lines[:1, neighbor_ids, :, :, :]
+                
+                with torch.no_grad():
+                    selected_imgs, selected_masks = selected_imgs.to(self.device), selected_masks.to(self.device) # move tensors to GPU
+                    selected_edges, selected_lines = selected_edges.to(self.device), selected_lines.to(self.device)
+
+                    edge_pred, line_pred = SampleEdgeLineLogits_video(self.inpaint_model.transformer,
+                    context=[selected_imgs.to(torch.float16), selected_edges.to(torch.float16), selected_lines.to(torch.float16)], 
+                    masks=selected_masks.to(torch.float16), iterations=5, add_v=0.05, mul_v=4, device=self.device)   
+
+                    edge_pred, line_pred = edge_pred.detach().to(torch.float32), line_pred.detach().to(torch.float32)
+                    selected_edges = selected_edges.detach()
+                    selected_lines = selected_lines.detach()
+
+                    items = dict()
+                    items['frames'] = selected_imgs
+                    items['masks'] = selected_masks
+                    items['edges'] = selected_edges
+                    items['lines'] = selected_lines
+                    items['name'] = video_name
+                    # batch['idxs'] = selected_idx
+
+                    # load pos encoding
+                    rel_pos_list, abs_pos_list, direct_list = [], [], []
+                    for m in selected_masks[0]:
+                        # transfrom mask to numpy array
+                        rel_pos, abs_pos, direct = load_masked_position_encoding(np.array(m.cpu()).squeeze(0), self.input_size, self.pos_num, self.str_size)
+                        # transfer tensor [4, 256, 256] to [4, 1, 1, 256, 256]
+                        rel_pos = torch.from_numpy(rel_pos).unsqueeze(0)
+                        abs_pos = torch.from_numpy(abs_pos).unsqueeze(0)
+                        direct = torch.from_numpy(direct).unsqueeze(0)
+
+                        rel_pos_list.append(rel_pos)
+                        abs_pos_list.append(abs_pos)
+                        direct_list.append(direct)
+                        
+                    # concat rel_pos, abs_pos, direct individually in dimention 1
+                    rel_pos_list = torch.cat(rel_pos_list, dim=0).unsqueeze(0)
+                    abs_pos_list = torch.cat(abs_pos_list, dim=0).unsqueeze(0)
+                    direct_list = torch.cat(direct_list, dim=0).unsqueeze(0)
+
+                    items['rel_pos'] = rel_pos_list.clone().to(torch.long).to(self.device)
+                    items['abs_pos'] = abs_pos_list.clone().to(torch.long).to(self.device)
+                    items['direct'] = direct_list.clone().to(torch.long).to(self.device)
+                    
+                    # print(f"items['name']: {items['name']}")
+                    # print(f"items['frames'].shape: {items['frames'].shape}")
+                    # print(f"items['masks'].shape: {items['masks'].shape}")
+                    # print(f"items['edges'].shape: {items['edges'].shape}")
+                    # print(f"items['lines'].shape: {items['lines'].shape}")
+                    # print(f"items['rel_pos'].shape: {items['rel_pos'].shape}")
+                    # print(f"items['abs_pos'].shape: {items['abs_pos'].shape}")
+                    # print(f"items['direct'].shape: {items['direct'].shape}")
+
+                    items = self.inpaint_model(items)
+                    outputs_merged = (items['predicted_video'] * items['masks']) + (items['frames'] * (1 - items['masks']))
+                    
+                    outputs_merged = outputs_merged.squeeze(0) # get rid of the batch dimension
+                    outputs_merged = outputs_merged.cpu().permute(0, 2, 3, 1).numpy()*255
+                    for i in range(len(neighbor_ids)): # iterate over all neighbor frames
+                        idx = neighbor_ids[i] # get the index of the neighbor frame
+                        img = np.array(outputs_merged[i]).astype( 
+                            np.uint8)*binary_masks[idx] + frames[idx] * (1-binary_masks[idx]) # get the inpainted frame
+                        if comp_frames[idx] is None: # if the completed frame is None, initialize it
+                            comp_frames[idx] = img 
+                        else: 
+                            comp_frames[idx] = comp_frames[idx].astype(
+                                np.float32)*0.5 + img.astype(np.float32)*0.5 # inpainted multiple times, and get the average result
+
+            ssim, psnr, s_psnr = 0., 0., 0. 
+            comp_PIL = [] 
+            for f in range(video_length): # iterate over all frames in this video
+                comp = comp_frames[f] # get the completed frame
+                comp = cv2.cvtColor(np.array(comp).astype(np.uint8), cv2.COLOR_BGR2RGB) # convert the completed frame to RGB
+                print(f"save in {os.path.join(save_result_dir, idx_lst[f])}")
+                cv2.imwrite(os.path.join(save_result_dir, idx_lst[f]), comp) # save the completed frame
+                new_comp = cv2.imread(os.path.join(save_result_dir, idx_lst[f])) # read the saved completed frame
+                new_comp = Image.fromarray(cv2.cvtColor(new_comp, cv2.COLOR_BGR2RGB)) # convert the completed frame to RGB
+                comp_PIL.append(new_comp) # append the completed frame to the list
+
+                gt = cv2.cvtColor(np.array(frames[f]).astype(np.uint8), cv2.COLOR_BGR2RGB) # convert the ground truth frame to RGB
+                ssim += measure_ssim(comp, gt, data_range=255, multichannel=True, win_size=65) # compute SSIM
+                s_psnr += measure_psnr(comp, gt, data_range=255) # compute PSNR
+
+            ssim_all += ssim
+            s_psnr_all += s_psnr
+            video_length_all += (video_length)
+            # FVID computation
+            imgs = _to_tensors(comp_PIL).unsqueeze(0).to(self.device)
+            gts = _to_tensors(frames_PIL).unsqueeze(0).to(self.device)
+            output_i3d_activations.append(get_i3d_activations(imgs).cpu().numpy().flatten())
+            real_i3d_activations.append(get_i3d_activations(gts).cpu().numpy().flatten())
+            fid_score_tmp = get_fid_score(real_i3d_activations, output_i3d_activations) # test
+            if video_no % 50 ==1:
+                print("video no[{}]: ssim {}, psnr {}, vfid {}".format(video_no, ssim_all/video_length_all, s_psnr_all/video_length_all, fid_score_tmp))
+
+        ssim_final = ssim_all/video_length_all
+        psnr_final = s_psnr_all/video_length_all
+        fid_score = get_fid_score(real_i3d_activations, output_i3d_activations)
+        print("[Finish evaluating, ssim is {}, psnr is {}]".format(ssim_final, psnr_final))
+        print("[fvid score is {}]".format(fid_score))
+
 
         if self.global_rank == 0:
             print("iter: %d, PSNR: %f, SSIM: %f, VFID: %f" %
-                    (self.inpaint_model.iteration, float(our_metric['psnr']), float(our_metric['ssim']),
-                    float(our_metric['vfid']), float(our_metric['lpips'])))
-            logs = [('iter', self.inpaint_model.iteration), ('PSNR', float(our_metric['psnr'])),
-                    ('SSIM', float(our_metric['ssim'])), ('VFID', float(our_metric['vfid']))]
+                    (self.inpaint_model.iteration, float(psnr_final), float(ssim_final),
+                    float(fid_score)))
+            logs = [('iter', self.inpaint_model.iteration), ('PSNR', float(psnr_final)),
+                    ('SSIM', float(ssim_final)), ('VFID', float(fid_score))]
             self.log(logs)
-        return float(our_metric['psnr']), float(our_metric['ssim']), float(our_metric['vfid'])
+        return float(psnr_final), float(ssim_final), float(fid_score)
 
     def sample(self, it=None):
         # do not sample when validation set is empty
@@ -1181,11 +1308,21 @@ if __name__ == '__main__':
     # test the ZITS_video train function
     # from src.inpainting_metrics import get_inpainting_metrics_video
     # print(get_inpainting_metrics_video(src='datasets/YouTubeVOS/test_all_frames/JPEGImages/', tgt='datasets/YouTubeVOS/test_all_frames/JPEGImages/', logger=None, device="cuda"))
-    config = Config(f'./config_list/config_{args.model_name}.yml')
-    config.training_model['net'] = args.model_name
+    args.path = os.path.join(args.path, args.model_name)
+    config_path = os.path.join(args.path, 'config.yml')
+
+    # create checkpoints path if does't exist
+    os.makedirs(args.path, exist_ok=True)
+
+    # copy config template if does't exist
+    if not os.path.exists(config_path):
+        copyfile(args.config_file, config_path)  ## Training, always copy
+
+    args.config_path = config_path
+    config = Config(args.config_path, args.model_name)
     # config_path = './config_list/config_ZITS_video.yml'
     # config = Config(config_path)
-    gpu = "cuda:0"
+    gpu = "cuda:1"
     rank = 0 
     args.world_size = 1
     config.world_size = 1
@@ -1197,7 +1334,7 @@ if __name__ == '__main__':
 # if __name__ == '__main__':
 #     unittest.main()
 
-# # main
+# main
 # if __name__ == '__main__':
 #     split = 'train'
 
