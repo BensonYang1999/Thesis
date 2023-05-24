@@ -315,7 +315,7 @@ _to_tensors = transforms.Compose([
     Stack(),
     ToTorchFormatTensor()])
 
-def init_i3d_model():
+def init_i3d_model(device):
     global i3d_model
     if i3d_model is not None:
         return
@@ -327,9 +327,9 @@ def init_i3d_model():
     #    urllib.request.urlretrieve('http://www.cmlab.csie.ntu.edu.tw/~zhe2325138/i3d_rgb_imagenet.pt', i3d_model_weight)
     i3d_model = InceptionI3d(400, in_channels=3, final_endpoint='Logits')
     i3d_model.load_state_dict(torch.load(i3d_model_weight))
-    i3d_model.to(torch.device('cuda:0'))
+    i3d_model.to(torch.device(device))
     
-def get_i3d_activations(batched_video, target_endpoint='Logits', flatten=True, grad_enabled=False):
+def get_i3d_activations(batched_video, target_endpoint='Logits', flatten=True, grad_enabled=False, device="cuda:0"):
     """
     Get features from i3d model and flatten them to 1d feature,
     valid target endpoints are defined in InceptionI3d.VALID_ENDPOINTS
@@ -354,7 +354,7 @@ def get_i3d_activations(batched_video, target_endpoint='Logits', flatten=True, g
         'Predictions',
     )
     """
-    init_i3d_model()
+    init_i3d_model(device)
     with torch.set_grad_enabled(grad_enabled):
         feat = i3d_model.extract_features(batched_video.transpose(1, 2), target_endpoint)
     if flatten:
@@ -372,10 +372,9 @@ def get_fid_score(real_activations, fake_activations):
     s2 = np.cov(fake_activations, rowvar=False)
     return calculate_frechet_distance(m1, s1, m2, s2)
 
-def get_inpainting_metrics_video(src, tgt, logger, device):
-    pred_list, gt_list = get_pred_gt_frame_list(src, tgt) # input -> ground truth
+def get_inpainting_metrics_video(pred, gt, logger, device):
 
-    assert len(pred_list) == len(gt_list), (len(pred_list), len(gt_list)) # make sure the number of images is the same
+    assert pred.shape == gt.shape, (pred.shape, gt.shape)
     
     video_num = len(gt_list) # number of videos
 
@@ -421,7 +420,6 @@ def get_inpainting_metrics_video(src, tgt, logger, device):
                 '\nPSNR:{0:.3f}, SSIM:{1:.3f}, vfid:{4:.3f}\n'.format(s_psnr_final, ssim_final, fid_score))
 
     return {'psnr': s_psnr_final, 'ssim': ssim_final, 'vfid': fid_score}
-
 
 if __name__ == "__main__":
     tgt = 'GT' # ground truth
