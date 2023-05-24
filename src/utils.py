@@ -10,6 +10,8 @@ import torchvision.transforms.functional as FF
 from PIL import Image
 from torch.optim.lr_scheduler import LambdaLR
 
+import cv2
+
 
 def set_seed(seed):
     random.seed(seed)
@@ -436,3 +438,166 @@ def to_device(data, device):
         return data
     if isinstance(data, list):
         return [to_device(d, device) for d in data]
+
+"""
+Below are the tool function reference from FuseFormer
+"""
+def get_frame_mask_edge_line_list(args):
+    if args.dataset == 'davis':
+        data_root = "./datasets/DATASET_DAVIS"
+        mask_dir = "./datasets/random_mask_stationary_w432_h240"
+        frame_dir = os.path.join(data_root, "JPEGImages", "480p")
+        edge_dir = os.path.join(data_root, "edges")
+        line_dir = os.path.join(data_root, "wireframes")
+    elif args.dataset == 'youtubevos':
+        data_root = "./datasets/YouTubeVOS/"
+        mask_dir = "./datasets/random_mask_stationary_youtube_w432_h240"
+        frame_dir = os.path.join(data_root, "test_all_frames", "JPEGImages")
+        if args.edge_gaussian == 0:
+            edge_dir = os.path.join(data_root, "test_all_frames", "edges_old")
+        else :
+            edge_dir = os.path.join(data_root, "test_all_frames", "edges")
+        line_dir = os.path.join(data_root, "test_all_frames", "wireframes")
+
+    mask_folder = sorted(os.listdir(mask_dir))
+    mask_list = [os.path.join(mask_dir, name) for name in mask_folder]
+    frame_folder = sorted(os.listdir(frame_dir))
+    frame_list = [os.path.join(frame_dir, name) for name in frame_folder]
+    edge_folder = sorted(os.listdir(edge_dir))
+    edge_list = [os.path.join(edge_dir, name) for name in edge_folder]
+    line_folder = sorted(os.listdir(line_dir))
+    line_list = [os.path.join(line_dir, name) for name in line_folder]    
+
+    print("[Finish building dataset {}]".format(args.dataset))
+    return frame_list, mask_list, edge_list, line_list
+
+# sample reference frames from the whole video 
+def get_ref_index(f, neighbor_ids, length, ref_length=5, num_ref=-1):
+    ref_index = []
+    if num_ref == -1: 
+        for i in range(0, length, ref_length): # sample from 0 to length with interval ref_length, try to get the whole story
+            if not i in neighbor_ids:
+                ref_index.append(i)
+    else:
+        start_idx = max(0, f - ref_length * (num_ref//2))
+        end_idx = min(length, f + ref_length * (num_ref//2))
+        for i in range(start_idx, end_idx+1, ref_length):
+            if not i in neighbor_ids:
+                ref_index.append(i)
+                if len(ref_index) >= num_ref:
+                    break
+    return ref_index
+
+# read frame-wise masks 
+def read_mask(mpath, w, h):
+    masks = []
+    mnames = os.listdir(mpath)
+    mnames.sort()
+    for m in mnames: 
+        m = Image.open(os.path.join(mpath, m))
+        m = m.resize((h, w), Image.NEAREST)
+        m = np.array(m.convert('L'))
+        m = np.array(m > 0).astype(np.uint8)
+        m = cv2.dilate(m, cv2.getStructuringElement(
+            cv2.MORPH_CROSS, (3, 3)), iterations=4)
+        masks.append(Image.fromarray(m*255)) # 0, 255
+    return masks
+
+#  read frames from video 
+def read_frame_from_videos(vname, w, h):
+
+    lst = os.listdir(vname)
+    lst.sort()
+    fr_lst = []
+    idx_lst = []
+    for name in lst:
+        fr_lst.append(vname+'/'+name)
+        idx_lst.append(name)
+    frames = []
+    for fr in fr_lst:
+        image = cv2.imread(fr)
+        image = Image.fromarray(cv2.cvtColor(image, cv2.COLOR_BGR2RGB))
+        frames.append(image.resize((h,w)))
+    return frames, idx_lst  
+
+def read_edge_line_PIL(edge_path, line_path, w, h):
+    edgeNames = os.listdir(edge_path)
+    edgeNames.sort()
+    lineNames = os.listdir(line_path)
+    lineNames.sort()
+
+    edge_list, line_list = [], []
+    for ename, lname in zip(edgeNames, lineNames):
+        edge_list.append(Image.open(os.path.join(edge_path, ename)).convert('L').resize((h,w)))
+        line_list.append(Image.open(os.path.join(line_path, lname)).convert('L').resize((h,w)))
+
+    return edge_list, line_list
+
+def create_square_masks(video_length, h, w):
+    masks = []
+    for i in range(video_length):
+        this_mask = np.zeros((h, w))
+        this_mask[int(h/4):h-int(h/4), int(w/4):w-int(w/4)] = 1
+        this_mask = Image.fromarray((this_mask*255).astype(np.uint8))
+        masks.append(this_mask.convert('L'))
+    return masks
+
+def get_res_list(dir):
+    folders = sorted(os.listdir(dir))
+    return [os.path.join(dir, f) for f in folders]
+
+def load_masked_position_encoding(mask, input_size, pos_num, str_size):
+        ori_mask = mask.copy()
+        ori_h, ori_w = ori_mask.shape[0:2] # original size
+        ori_mask = ori_mask / 255
+        # mask = cv2.resize(mask, (self.str_size, self.str_size), interpolation=cv2.INTER_AREA)
+        mask = cv2.resize(mask, input_size, interpolation=cv2.INTER_AREA)
+        mask[mask > 0] = 255 # make sure the mask is binary
+        h, w = mask.shape[0:2] # resized size
+        mask3 = mask.copy() 
+        mask3 = 1. - (mask3 / 255.0) # 0 for masked area, 1 for unmasked area
+        pos = np.zeros((h, w), dtype=np.int32) # position encoding
+        direct = np.zeros((h, w, 4), dtype=np.int32) # direction encoding
+        i = 0
+        while np.sum(1 - mask3) > 0: # while there is still unmasked area
+            i += 1 # i is the index of the current mask
+            mask3_ = cv2.filter2D(mask3, -1, np.ones((3, 3), dtype=np.float32)) # dilate the mask
+            mask3_[mask3_ > 0] = 1 # make sure the mask is binary
+            sub_mask = mask3_ - mask3 # get the newly added area
+            pos[sub_mask == 1] = i # set the position encoding
+
+            m = cv2.filter2D(mask3, -1, np.array([[1, 1, 0], [1, 1, 0], [0, 0, 0]], dtype=np.float32))
+            m[m > 0] = 1
+            m = m - mask3
+            direct[m == 1, 0] = 1
+
+            m = cv2.filter2D(mask3, -1, np.array([[0, 0, 0], [1, 1, 0], [1, 1, 0]], dtype=np.float32))
+            m[m > 0] = 1
+            m = m - mask3
+            direct[m == 1, 1] = 1
+
+            m = cv2.filter2D(mask3, -1, np.array([[0, 1, 1], [0, 1, 1], [0, 0, 0]], dtype=np.float32))
+            m[m > 0] = 1
+            m = m - mask3
+            direct[m == 1, 2] = 1
+
+            m = cv2.filter2D(mask3, -1, np.array([[0, 0, 0], [0, 1, 1], [0, 1, 1]], dtype=np.float32))
+            m[m > 0] = 1
+            m = m - mask3
+            direct[m == 1, 3] = 1
+
+            mask3 = mask3_
+
+        abs_pos = pos.copy() # absolute position encoding
+        rel_pos = pos / (str_size / 2)  # to 0~1 maybe larger than 1
+        rel_pos = (rel_pos * pos_num).astype(np.int32) # to 0~pos_num
+        rel_pos = np.clip(rel_pos, 0, pos_num - 1) # clip to 0~pos_num-1
+
+        if ori_w != w or ori_h != h: # if the mask is resized
+            rel_pos = cv2.resize(rel_pos, (ori_w, ori_h), interpolation=cv2.INTER_NEAREST)
+            rel_pos[ori_mask == 0] = 0
+            direct = cv2.resize(direct, (ori_w, ori_h), interpolation=cv2.INTER_NEAREST)
+            direct[ori_mask == 0, :] = 0
+
+        return rel_pos, abs_pos, direct
+    

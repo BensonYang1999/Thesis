@@ -1135,8 +1135,8 @@ class ZITS_video:
                 s_psnr_all += s_psnr
 
         vfid_score = get_fid_score(real_i3d_activations, output_i3d_activations)
-        ssim_final = ssim_all/(len(val_loader)*args.ref_frame_num)
-        s_psnr_final = s_psnr_all/(len(val_loader)*args.ref_frame_num)
+        ssim_final = ssim_all/(len(val_loader)*args.ref_frame_num*self.config.BATCH_SIZE)
+        s_psnr_final = s_psnr_all/(len(val_loader)*args.ref_frame_num*self.config.BATCH_SIZE)
         
         if self.global_rank == 0:
             print("iter: %d, PSNR: %f, SSIM: %f, VFID: %f" %
