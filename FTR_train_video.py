@@ -122,7 +122,7 @@ if __name__ == "__main__":
         args.world_size = args.nodes * args.gpus
         os.environ['MASTER_ADDR'] = 'localhost'
         # os.environ['MASTER_PORT'] = '22323'
-        os.environ['MASTER_PORT'] = '50580'
+        os.environ['MASTER_PORT'] = '50570'
     else:
         args.world_size = 1
 
