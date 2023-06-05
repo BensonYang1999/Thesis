@@ -370,7 +370,7 @@ class ReZeroFFC_video_2D(LaMa_model_video_2D):
         else:
             inp = x.to(torch.float32)
         x = self.bn1(inp)
-        x = self.act(x)
+        x = self.act(x) 
 
         x = self.conv2(x + str_feats[0])
         x = self.bn2(x.to(torch.float32))
@@ -504,40 +504,64 @@ class StructureEncoder(nn.Module):
             self.alpha6 = nn.Parameter(torch.tensor(0, dtype=torch.float32), requires_grad=True)
 
     def forward(self, x, rel_pos=None, direct=None):
+        # print(f"2D original shape: {x.shape}") # test
+        # print(f"1 pad before: {x.shape}") # test
         x = self.pad1(x)
+        # print(f"1 pad after: {x.shape}") # test
         x = self.conv1(x)
+        # print(f"1 conv1 after: {x.shape}") # test
         x = self.bn1(x.to(torch.float32))
+        # print(f"1 bn1 after: {x.shape}") # test
         x = self.act(x)
+        # print(f"1 act after: {x.shape}") # test
 
         x = self.conv2(x)
+        # print(f"2 conv2 after: {x.shape}") # test
         x = self.bn2(x.to(torch.float32))
+        # print(f"2 bn2 after: {x.shape}") # test
         x = self.act(x)
+        # print(f"2 act2 after: {x.shape}") # test
 
         x = self.conv3(x)
+        # print(f"3 conv3 after: {x.shape}") # test
         x = self.bn3(x.to(torch.float32))
+        # print(f"3 bn3 after: {x.shape}") # test
         x = self.act(x)
+        # print(f"3 act3 after: {x.shape}") # test
 
         x = self.conv4(x)
+        # print(f"4 conv4 after: {x.shape}") # test
         x = self.bn4(x.to(torch.float32))
+        # print(f"4 bn4 after: {x.shape}") # test
         x = self.act(x)
+        # print(f"4 act4 after: {x.shape}") # test
 
         return_feats = []
         x = self.middle(x)
         return_feats.append(x * self.alpha1)
 
         x = self.convt1(x)
+        # print(f"1 convt1 after: {x.shape}") # test
         x = self.bnt1(x.to(torch.float32))
+        # print(f"1 bnt1 after: {x.shape}") # test
         x = self.act(x)
+        # print(f"1 act1 after: {x.shape}") # test
         return_feats.append(x * self.alpha2)
 
         x = self.convt2(x)
+        # print(f"2 convt2 after: {x.shape}") # test
         x = self.bnt2(x.to(torch.float32))
+        # print(f"2 bnt2 after: {x.shape}") # test
         x = self.act(x)
+        # print(f"2 act2 after: {x.shape}") # test
         return_feats.append(x * self.alpha3)
 
         x = self.convt3(x)
+        # print(f"3 convt3 after: {x.shape}") # test
         x = self.bnt3(x.to(torch.float32))
+        # print(f"3 bnt3 after: {x.shape}") # test
         x = self.act(x)
+        # print(f"3 act3 after: {x.shape}") # test
         return_feats.append(x * self.alpha4)
 
         return_feats = return_feats[::-1]
@@ -582,6 +606,182 @@ class StructureEncoder_video_2D(nn.Module):
             return return_feats_t
         else:
             return return_feats_t, torch.stack(rel_pos_emb_t).permute(1,0,2,3,4), torch.stack(direct_emb_t).permute(1,0,2,3,4)
+
+from src.models.fuseformer_origin import AddPosEmb, MultiHeadedAttention
+
+class FeedForward(nn.Module):
+    def __init__(self, d_model, d_ff=2048, dropout = 0.1):
+        super().__init__() 
+        # We set d_ff as a default to 2048
+        self.linear_1 = nn.Linear(d_model, d_ff)
+        self.dropout = nn.Dropout(dropout)
+        self.linear_2 = nn.Linear(d_ff, d_model)
+        self.act = nn.ReLU(True)
+    def forward(self, x):
+        x = self.dropout(self.act(self.linear_1(x)))
+        x = self.linear_2(x)
+        return x
+    
+class TransformerBlock(nn.Module):
+    """
+    Transformer = MultiHead_Attention + Feed_Forward with sublayer connection
+    """
+
+    def __init__(self, hidden=128, num_head=4, dropout=0.1):
+        super().__init__()
+        self.attention = MultiHeadedAttention(d_model=hidden, head=num_head, p=dropout)
+        self.ffn = FeedForward(d_model=hidden, d_ff=512, dropout=dropout)
+        self.norm1 = nn.LayerNorm(hidden)
+        self.norm2 = nn.LayerNorm(hidden)
+        self.dropout = nn.Dropout(p=dropout)
+
+    def forward(self, input):
+        x = self.norm1(input)
+        x = input + self.dropout(self.attention(x))
+        y = self.norm2(x)
+        x = x + self.ffn(y)
+        return x
+    
+class StructureEncoder_video_3D(nn.Module):
+    def __init__(self, config):
+        super().__init__()
+        if config.rezero_for_mpe is None:
+            self.rezero_for_mpe = False
+        else:
+            self.rezero_for_mpe = config.rezero_for_mpe
+
+        self.pad1 = nn.ReflectionPad3d((3, 3, 3, 3, 0, 0)) # [b, c, h, w] = [2, 3, 240, 432] => [2, 3, 246, 438]
+        self.conv1 = GateConv3D(in_channels=3, out_channels=64, kernel_size=(1, 7, 7), stride=1, padding=0) # [2, 3, 246, 438] => [2, 64, 240, 432]
+        self.bn1 = nn.BatchNorm3d(64) # [2, 64, 240, 432]
+        self.act = nn.ReLU(True) # [2, 64, 240, 432]
+
+        self.conv2 = GateConv3D(in_channels=64, out_channels=128, kernel_size=(1, 4, 4), stride=2, padding=(2, 1, 1)) # [2, 64, 240, 432] => [2, 128, 120, 216]
+        self.bn2 = nn.BatchNorm3d(128)
+
+        self.conv3 = nn.Conv3d(in_channels=128, out_channels=256, kernel_size=(1, 4, 4), stride=2, padding=(2, 1, 1))
+        self.bn3 = nn.BatchNorm3d(256)
+
+        self.conv4 = nn.Conv3d(in_channels=256, out_channels=512, kernel_size=(1, 4, 4), stride=2, padding=(2, 1, 1))
+        self.bn4 = nn.BatchNorm3d(512)
+
+        blocks = []
+        # resnet blocks
+        # for i in range(3):
+        #     blocks.append(ResnetBlock(input_dim=512, out_dim=None, dilation=2))
+
+        stack_num = 3
+        n_vecs = config.ref_frame_num*30*54
+        hidden = 512
+        for _ in range(stack_num):
+            blocks.append(TransformerBlock(hidden=512, num_head=4, dropout=0.1))
+        self.transformer = nn.Sequential(*blocks)
+        
+        self.add_pos_emb = AddPosEmb(n_vecs, hidden)
+
+        # self.middle = nn.Sequential(*blocks)
+        self.alpha1 = nn.Parameter(torch.tensor(0, dtype=torch.float32), requires_grad=True)
+
+        self.convt1 = GateConv3D(512, 256, kernel_size=(1, 4, 4), stride=2, padding=(2, 1, 1), transpose=True)
+        self.bnt1 = nn.BatchNorm3d(256)
+        self.alpha2 = nn.Parameter(torch.tensor(0, dtype=torch.float32), requires_grad=True)
+
+        self.convt2 = GateConv3D(256, 128, kernel_size=(1, 4, 4), stride=2, padding=(2, 1, 1), transpose=True)
+        self.bnt2 = nn.BatchNorm3d(128)
+        self.alpha3 = nn.Parameter(torch.tensor(0, dtype=torch.float32), requires_grad=True)
+
+        self.convt3 = GateConv3D(128, 64, kernel_size=(1, 4, 4), stride=2, padding=(2, 1, 1), transpose=True)
+        self.bnt3 = nn.BatchNorm3d(64)
+        self.alpha4 = nn.Parameter(torch.tensor(0, dtype=torch.float32), requires_grad=True)
+
+        if self.rezero_for_mpe:
+            self.rel_pos_emb = MaskedSinusoidalPositionalEmbedding(num_embeddings=config.rel_pos_num,
+                                                                   embedding_dim=64)
+            self.direct_emb = MultiLabelEmbedding(num_positions=4, embedding_dim=64)
+            self.alpha5 = nn.Parameter(torch.tensor(0, dtype=torch.float32), requires_grad=True)
+            self.alpha6 = nn.Parameter(torch.tensor(0, dtype=torch.float32), requires_grad=True)
+
+    def forward(self, x, rel_pos=None, direct=None):
+        # print(f"input x before: {x.shape}") # test
+        x = x.permute(0, 2, 1, 3, 4)
+        # print(f"input x after: {x.shape}") # test
+
+        x = self.pad1(x) # [b, c, h, w] = [2, 3, 240, 432] => [2, 3, 246, 438]
+        # print(f"pad after: {x.shape}") # test
+        x = self.conv1(x) # [2, 3, 246, 438] => [2, 64, 240, 432]
+        # print(f"conv1 after: {x.shape}")
+        x = self.bn1(x.to(torch.float32)) # [2, 64, 240, 432]
+        x = self.act(x) # [2, 64, 240, 432]
+
+        x = self.conv2(x) # [2, 64, 240, 432] => [2, 128, 120, 216]
+        x = self.bn2(x.to(torch.float32)) # [2, 128, 120, 216]
+        x = self.act(x) # [2, 128, 120, 216]
+
+        x = self.conv3(x) # [2, 128, 120, 216] => [2, 256, 60, 108]
+        x = self.bn3(x.to(torch.float32)) # [2, 256, 60, 108]
+        x = self.act(x) # [2, 256, 60, 108]
+
+        x = self.conv4(x) # [2, 256, 60, 108] => [2, 512, 30, 54]
+        x = self.bn4(x.to(torch.float32)) # [2, 512, 30, 54]
+        x = self.act(x) # [2, 512, 30, 54]
+
+        return_feats = []
+        # print(f"trans feature before: {x.shape}") # test ([2, 512, 5, 30, 54])
+        b, c, t, h, w = x.shape
+        trans_feat = x.permute(0, 2, 3, 4, 1) # change to [b, t, c, h, w]
+        trans_feat = trans_feat.view(b, t*h*w, c)
+        trans_feat = self.add_pos_emb(trans_feat)
+        # print(f"trans_feat before shape: {trans_feat.shape}") # test
+        trans_feat = self.transformer(trans_feat)
+        # print(f"trans_feat after shape: {trans_feat.shape}") # test
+        trans_feat = trans_feat.view(b, t, h, w, c)
+        # print(f"trans_feat after view shape: {trans_feat.shape}") # test
+        trans_feat = trans_feat.permute(0, 4, 1, 2, 3) # change to [b, t, c, h, w]
+        # print(f"trans feature after: {x.shape}") # test ([2, 512, 5, 30, 54])
+        # print(f"ResNet after: {trans_feat.shape}") # test
+        x = x + trans_feat
+        # print(f"x shape: {x.shape}") # test
+        # print(f"return_feats shape: {x.shape}") # test
+        # print(f"return_feats permute shape: {x.permute(0, 2, 1, 3, 4).shape}") # test
+        return_feats.append(x.permute(0, 2, 1, 3, 4) * self.alpha1)
+
+        # print(f"x before transpose: {x.shape}") # test
+        x = self.convt1(x) # [2, 512, 30, 54] => [2, 256, 60, 108] # [2, 256, 5, 60, 108]
+        # print(f" x after convt1: {x.shape}") # test
+        x = self.bnt1(x.to(torch.float32)) # [2, 256, 60, 108]
+        x = self.act(x) # [2, 256, 60, 108]
+        return_feats.append(x.permute(0, 2, 1, 3, 4) * self.alpha2)
+        # print(f"x after transpose: {x.shape}") # test
+
+        x = self.convt2(x) # [2, 256, 60, 108] => [2, 128, 120, 216] # [2, 128, 5, 120, 216]
+        x = self.bnt2(x.to(torch.float32)) # [2, 128, 120, 216]
+        x = self.act(x) # [2, 128, 120, 216]
+        # print(f" x after convt2: {x.shape}") # test
+        return_feats.append(x.permute(0, 2, 1, 3, 4) * self.alpha3)
+
+        x = self.convt3(x) # [2, 128, 120, 216] => [2. 64, 240, 432] # [2, 64, 5, 240, 432]
+        x = self.bnt3(x.to(torch.float32)) # [2. 64, 240, 432]
+        x = self.act(x) # [2. 64, 240, 432]
+        # print(f" x after convt3: {x.shape}") # test
+        return_feats.append(x.permute(0, 2, 1, 3, 4) * self.alpha4)
+
+        return_feats = return_feats[::-1]
+
+        if not self.rezero_for_mpe:
+            return return_feats
+        else:
+            # print(f"rel_pos shape: {rel_pos.shape}") # test
+            b, t, h, w = rel_pos.shape
+            rel_pos = rel_pos.reshape(b * t, h * w)
+            # rel_pos_emb = self.rel_pos_emb(rel_pos).reshape(b, t, h, w, -1).permute(0, 3, 1, 2) * self.alpha5
+            rel_pos_emb = self.rel_pos_emb(rel_pos)
+            # print(f'rel_pos_emb output shape: {rel_pos_emb.reshape(b, t, h, w, -1).permute(0, 1, 4, 2, 3).shape}') # test
+            # print(f"direct shape: {direct.shape}") # test
+            direct = direct.reshape(b * t, h * w, 4).to(torch.float32)
+            # print(f"direct shape after: {direct.shape}") # test
+            direct_emb = self.direct_emb(direct).reshape(b, t, h, w, -1).permute(0, 1, 4, 2, 3) * self.alpha6
+            # print(f"direct_emb shape: {direct_emb.shape}") # test
+
+            return return_feats, rel_pos_emb, direct_emb
 
 
 class NLayerDiscriminator(nn.Module):

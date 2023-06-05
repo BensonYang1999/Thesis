@@ -325,7 +325,7 @@ class BaseInpaintingTrainingModule_video(nn.Module):
         self.gen_weights_path = os.path.join(config.PATH, name + '_gen.pth')
         self.dis_weights_path = os.path.join(config.PATH, name + '_dis.pth')
 
-        self.str_encoder = StructureEncoder_video_2D(config).cuda(gpu) # structure encoder for one image
+        self.str_encoder = StructureEncoder_video_3D(config).cuda(gpu) # structure encoder for one image
         self.generator = ReZeroFFC_video_2D(config).cuda(gpu) # generator
         self.best = None
 

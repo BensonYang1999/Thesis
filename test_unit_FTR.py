@@ -445,7 +445,7 @@ class BaseInpaintingTrainingModule_video(nn.Module):
         self.gen_weights_path = os.path.join(config.PATH, name + '_gen.pth')
         self.dis_weights_path = os.path.join(config.PATH, name + '_dis.pth')
 
-        self.str_encoder = StructureEncoder_video_2D(config).cuda(gpu) # structure encoder for one image
+        self.str_encoder = StructureEncoder_video_3D(config).cuda(gpu) # structure encoder for one image
         self.generator = ReZeroFFC_video_2D(config).cuda(gpu) # generator
         self.best = None
 
@@ -755,7 +755,7 @@ import argparse
 from shutil import copyfile
 
 parser = argparse.ArgumentParser()
-parser.add_argument('--model_name', type=str, default='ZITS_video_check', help='the name of this model')
+parser.add_argument('--model_name', type=str, default='ZITS_video_test', help='the name of this model')
 parser.add_argument('--path', '--checkpoints', type=str, default="./ckpt",
                     help='model checkpoints path (default: ./checkpoints)')
 parser.add_argument('--config_file', type=str, default='./config_list/config_ZITS_video.yml',
