@@ -9,9 +9,12 @@ max_sigma: 3.75
 round: 64
 rezero_for_mpe: True
 
-transformer_ckpt_path: './ckpt/ZITS_video_YouTubeVOS_08hole_02valid_1edge_1line_minMaxNorm_newEdge_bs2_bce_0419/best.pth'
-gen_weights_path0: './ckpt/lama_youtube/InpaintingModel_video_gen.pth'   # Not required at the time of eval
-dis_weights_path0: './ckpt/lama_youtube/InpaintingModel_video_dis.pth'   # Not required at the time of eval
+SFE_structure: resnet # or transformer
+
+# model_name: '0522_ZITS_video_firstTry'
+transformer_ckpt_path: './ckpt/0521_ZITS_video_YouTubeVOS_08hole_02valid_1edge_1line_minMaxNorm_oldEdge_bs2_bce/best.pth'
+# gen_weights_path0: './ckpt/lama_youtube/InpaintingModel_video_gen.pth'   # Not required at the time of eval
+# dis_weights_path0: './ckpt/lama_youtube/InpaintingModel_video_dis.pth'   # Not required at the time of eval
 structure_upsample_path: './ckpt/StructureUpsampling.pth'
 ###########################
 # modify the line path
@@ -29,18 +32,25 @@ structure_upsample_path: './ckpt/StructureUpsampling.pth'
 # MASK_RATE: [0.4, 0.8, 1.0]
 # TEST_MASK_FLIST: /home/wmlce/Image-Transformer-Inpainting/data/indoor/test_mask
 
-BATCH_SIZE: 18                 # input batch size for training
-INPUT_SIZE: 512               # input image size for training 0 for original size
+# BATCH_SIZE: 18                 # input batch size for training
+BATCH_SIZE: 2                 # input batch size for training
+# INPUT_SIZE: 512               # input image size for training 0 for original size
+INPUT_SIZE: 256               # input image size for training 0 for original size
 START_ITERS: 800000             # start iters for lama
-MIX_ITERS: 808000                # gradually mix the edge and line with prediction from transformer
-Turning_Point: 820000            # only use the predict from transformer for edge and line
-MAX_ITERS: 850001                # maximum number of iterations to train the model
+# MIX_ITERS: 808000                # gradually mix the edge and line with prediction from transformer
+# MIX_ITERS: 600000                # gradually mix the edge and line with prediction from transformer
+MIX_ITERS: 91600                # gradually mix the edge and line with prediction from transformer
+Turning_Point: 94000            # only use the predict from transformer for edge and line
+# MAX_ITERS: 850001                # maximum number of iterations to train the model
+MAX_ITERS: 100000                # maximum number of iterations to train the model
 
 SAVE_INTERVAL: 1000           # how many iterations to wait before saving model (0: never)
-SAMPLE_INTERVAL: 1000         # how many iterations to wait before sampling (0: never)
-SAMPLE_SIZE: 12               # number of images to sample
-EVAL_INTERVAL: 5000              # how many iterations to wait before model evaluation (0: never)
-LOG_INTERVAL: 1000            # how many iterations to wait before logging training status (0: never)
+# SAMPLE_INTERVAL: 1000         # how many iterations to wait before sampling (0: never)
+SAMPLE_INTERVAL: 2000         # how many iterations to wait before sampling (0: never)
+SAMPLE_SIZE: 6               # number of images to sample
+# EVAL_INTERVAL: 5000              # how many iterations to wait before model evaluation (0: never)
+EVAL_INTERVAL: 2000              # how many iterations to wait before model evaluation (0: never)
+LOG_INTERVAL: 500            # how many iterations to wait before logging training status (0: never)
 
 run_title: ''
 

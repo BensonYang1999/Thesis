@@ -149,42 +149,64 @@ class LaMa_model(nn.Module):
         return x
 
 class LaMa_model_video_2D(nn.Module):
-    def __init__(self):
+    def __init__(self, config):
         super().__init__()
+        self.config = config
+
+        self.channel1 = config.generator['ngf']
+        self.channel2 = self.channel1 * 2
+        self.channel3 = self.channel2 * 2
+        self.channel4 = self.channel3 * 2
 
         self.pad1 = nn.ReflectionPad2d(3)
-        self.conv1 = nn.Conv2d(in_channels=4, out_channels=64, kernel_size=7, padding=0)
-        self.bn1 = nn.BatchNorm2d(64)
+        # self.conv1 = nn.Conv2d(in_channels=4, out_channels=64, kernel_size=7, padding=0)
+        # self.bn1 = nn.BatchNorm2d(64)
+        self.conv1 = nn.Conv2d(in_channels=4, out_channels=self.channel1, kernel_size=7, padding=0)
+        self.bn1 = nn.BatchNorm2d(self.channel1)
         self.act = nn.ReLU(True)
 
-        self.conv2 = nn.Conv2d(in_channels=64, out_channels=128, kernel_size=3, stride=2, padding=1)
-        self.bn2 = nn.BatchNorm2d(128)
+        # self.conv2 = nn.Conv2d(in_channels=64, out_channels=128, kernel_size=3, stride=2, padding=1)
+        # self.bn2 = nn.BatchNorm2d(128)
+        self.conv2 = nn.Conv2d(in_channels=self.channel1, out_channels=self.channel2, kernel_size=3, stride=2, padding=1)
+        self.bn2 = nn.BatchNorm2d(self.channel2)
 
-        self.conv3 = nn.Conv2d(in_channels=128, out_channels=256, kernel_size=3, stride=2, padding=1)
-        self.bn3 = nn.BatchNorm2d(256)
+        # self.conv3 = nn.Conv2d(in_channels=128, out_channels=256, kernel_size=3, stride=2, padding=1)
+        # self.bn3 = nn.BatchNorm2d(256)
+        self.conv3 = nn.Conv2d(in_channels=self.channel2, out_channels=self.channel3, kernel_size=3, stride=2, padding=1)
+        self.bn3 = nn.BatchNorm2d(self.channel3)
 
-        self.conv4 = nn.Conv2d(in_channels=256, out_channels=512, kernel_size=3, stride=2, padding=1)
-        self.bn4 = nn.BatchNorm2d(512)
+        # self.conv4 = nn.Conv2d(in_channels=256, out_channels=512, kernel_size=3, stride=2, padding=1)
+        # self.bn4 = nn.BatchNorm2d(512)
+        self.conv4 = nn.Conv2d(in_channels=self.channel3, out_channels=self.channel4, kernel_size=3, stride=2, padding=1)
+        self.bn4 = nn.BatchNorm2d(self.channel4)
 
         blocks = []
         ### resnet blocks
         for i in range(9):
-            cur_resblock = ResnetBlock_remove_IN(512, 1)
+            # cur_resblock = ResnetBlock_remove_IN(512, 1)
+            cur_resblock = ResnetBlock_remove_IN(self.channel4, 1)
             blocks.append(cur_resblock)
 
         self.middle = nn.Sequential(*blocks)
 
-        self.convt1 = nn.ConvTranspose2d(512, 256, kernel_size=3, stride=2, padding=1, output_padding=1)
-        self.bnt1 = nn.BatchNorm2d(256)
+        # self.convt1 = nn.ConvTranspose2d(512, 256, kernel_size=3, stride=2, padding=1, output_padding=1)
+        # self.bnt1 = nn.BatchNorm2d(256)
+        self.convt1 = nn.ConvTranspose2d(self.channel4, self.channel3, kernel_size=3, stride=2, padding=1, output_padding=1)
+        self.bnt1 = nn.BatchNorm2d(self.channel3)
 
-        self.convt2 = nn.ConvTranspose2d(256, 128, kernel_size=3, stride=2, padding=1, output_padding=1)
-        self.bnt2 = nn.BatchNorm2d(128)
+        # self.convt2 = nn.ConvTranspose2d(256, 128, kernel_size=3, stride=2, padding=1, output_padding=1)
+        # self.bnt2 = nn.BatchNorm2d(128)
+        self.convt2 = nn.ConvTranspose2d(self.channel3, self.channel2, kernel_size=3, stride=2, padding=1, output_padding=1)
+        self.bnt2 = nn.BatchNorm2d(self.channel2)
 
-        self.convt3 = nn.ConvTranspose2d(128, 64, kernel_size=3, stride=2, padding=1, output_padding=1)
-        self.bnt3 = nn.BatchNorm2d(64)
+        # self.convt3 = nn.ConvTranspose2d(128, 64, kernel_size=3, stride=2, padding=1, output_padding=1)
+        # self.bnt3 = nn.BatchNorm2d(64)
+        self.convt3 = nn.ConvTranspose2d(self.channel2, self.channel1, kernel_size=3, stride=2, padding=1, output_padding=1)
+        self.bnt3 = nn.BatchNorm2d(self.channel1)
 
         self.padt = nn.ReflectionPad2d(3)
-        self.convt4 = nn.Conv2d(in_channels=64, out_channels=3, kernel_size=7, padding=0)
+        # self.convt4 = nn.Conv2d(in_channels=64, out_channels=3, kernel_size=7, padding=0)
+        self.convt4 = nn.Conv2d(in_channels=self.channel1, out_channels=3, kernel_size=7, padding=0)
         self.act_last = nn.Tanh()
 
     def forward(self, x, rel_pos_emb=None, direct_emb=None, str_feats=None):
@@ -353,8 +375,8 @@ class ReZeroFFC(LaMa_model):
 
 class ReZeroFFC_video_2D(LaMa_model_video_2D):
     def __init__(self, config):
-        super().__init__()
-        self.config = config
+        super().__init__(config)
+        # self.config = config
 
     def forward(self, x, rel_pos_emb=None, direct_emb=None, str_feats=None):
         b, t, c, h, w = x.shape
@@ -406,7 +428,7 @@ class ReZeroFFC_video_2D(LaMa_model_video_2D):
         return x
 
 
-class ReZeroFFC_Video_3D(LaMa_model_video_3D):
+class ReZeroFFC_video_3D(LaMa_model_video_3D):
     def __init__(self, config):
         super().__init__()
         self.config = config
@@ -462,48 +484,57 @@ class StructureEncoder(nn.Module):
         else:
             self.rezero_for_mpe = config.rezero_for_mpe
 
+        self.channel1 = config.generator['ngf']
+        self.channel2 = self.channel1 * 2
+        self.channel3 = self.channel2 * 2
+        self.channel4 = self.channel3 * 2
+
         self.pad1 = nn.ReflectionPad2d(3)
-        self.conv1 = GateConv(in_channels=3, out_channels=64, kernel_size=7, stride=1, padding=0)
-        self.bn1 = nn.BatchNorm2d(64)
+        self.conv1 = GateConv(in_channels=3, out_channels=self.channel1, kernel_size=7, stride=1, padding=0)
+        self.bn1 = nn.BatchNorm2d(self.channel1)
         self.act = nn.ReLU(True)
 
-        self.conv2 = GateConv(in_channels=64, out_channels=128, kernel_size=4, stride=2, padding=1)
-        self.bn2 = nn.BatchNorm2d(128)
+        self.conv2 = GateConv(in_channels=self.channel1, out_channels=self.channel2, kernel_size=4, stride=2, padding=1)
+        self.bn2 = nn.BatchNorm2d(self.channel2)
 
-        self.conv3 = nn.Conv2d(in_channels=128, out_channels=256, kernel_size=4, stride=2, padding=1)
-        self.bn3 = nn.BatchNorm2d(256)
+        self.conv3 = nn.Conv2d(in_channels=self.channel2, out_channels=self.channel3, kernel_size=4, stride=2, padding=1)
+        self.bn3 = nn.BatchNorm2d(self.channel3)
 
-        self.conv4 = nn.Conv2d(in_channels=256, out_channels=512, kernel_size=4, stride=2, padding=1)
-        self.bn4 = nn.BatchNorm2d(512)
+        self.conv4 = nn.Conv2d(in_channels=self.channel3, out_channels=self.channel4, kernel_size=4, stride=2, padding=1)
+        self.bn4 = nn.BatchNorm2d(self.channel4)
 
         blocks = []
         # resnet blocks
         for i in range(3):
-            blocks.append(ResnetBlock(input_dim=512, out_dim=None, dilation=2))
+            blocks.append(ResnetBlock(input_dim=self.channel4, out_dim=None, dilation=2))
 
         self.middle = nn.Sequential(*blocks)
         self.alpha1 = nn.Parameter(torch.tensor(0, dtype=torch.float32), requires_grad=True)
 
-        self.convt1 = GateConv(512, 256, kernel_size=4, stride=2, padding=1, transpose=True)
-        self.bnt1 = nn.BatchNorm2d(256)
+        self.convt1 = GateConv(self.channel4, self.channel3, kernel_size=4, stride=2, padding=1, transpose=True)
+        self.bnt1 = nn.BatchNorm2d(self.channel3)
         self.alpha2 = nn.Parameter(torch.tensor(0, dtype=torch.float32), requires_grad=True)
 
-        self.convt2 = GateConv(256, 128, kernel_size=4, stride=2, padding=1, transpose=True)
-        self.bnt2 = nn.BatchNorm2d(128)
+        self.convt2 = GateConv(self.channel3, self.channel2, kernel_size=4, stride=2, padding=1, transpose=True)
+        self.bnt2 = nn.BatchNorm2d(self.channel2)
         self.alpha3 = nn.Parameter(torch.tensor(0, dtype=torch.float32), requires_grad=True)
 
-        self.convt3 = GateConv(128, 64, kernel_size=4, stride=2, padding=1, transpose=True)
-        self.bnt3 = nn.BatchNorm2d(64)
+        self.convt3 = GateConv(self.channel2, self.channel1, kernel_size=4, stride=2, padding=1, transpose=True)
+        self.bnt3 = nn.BatchNorm2d(self.channel1)
         self.alpha4 = nn.Parameter(torch.tensor(0, dtype=torch.float32), requires_grad=True)
 
         if self.rezero_for_mpe:
             self.rel_pos_emb = MaskedSinusoidalPositionalEmbedding(num_embeddings=config.rel_pos_num,
-                                                                   embedding_dim=64)
-            self.direct_emb = MultiLabelEmbedding(num_positions=4, embedding_dim=64)
+                                                                   embedding_dim=self.channel1)
+            self.direct_emb = MultiLabelEmbedding(num_positions=4, embedding_dim=self.channel1)
             self.alpha5 = nn.Parameter(torch.tensor(0, dtype=torch.float32), requires_grad=True)
             self.alpha6 = nn.Parameter(torch.tensor(0, dtype=torch.float32), requires_grad=True)
 
     def forward(self, x, rel_pos=None, direct=None):
+        # x = torch.cat([batch['edges'], batch['lines'], mask], dim=2) # [B, T, 3, H, W] for video 
+        if not self.config.use_SPI:  # never mind the mask
+            x = x[:, :, :2, :, :]
+
         # print(f"2D original shape: {x.shape}") # test
         # print(f"1 pad before: {x.shape}") # test
         x = self.pad1(x)
@@ -650,19 +681,32 @@ class StructureEncoder_video_3D(nn.Module):
         else:
             self.rezero_for_mpe = config.rezero_for_mpe
 
+        self.channel1 = config.generator['ngf']
+        self.channel2 = self.channel1 * 2
+        self.channel3 = self.channel2 * 2
+        self.channel4 = self.channel3 * 2
+
         self.pad1 = nn.ReflectionPad3d((3, 3, 3, 3, 0, 0)) # [b, c, h, w] = [2, 3, 240, 432] => [2, 3, 246, 438]
-        self.conv1 = GateConv3D(in_channels=3, out_channels=64, kernel_size=(1, 7, 7), stride=1, padding=0) # [2, 3, 246, 438] => [2, 64, 240, 432]
-        self.bn1 = nn.BatchNorm3d(64) # [2, 64, 240, 432]
+        # self.conv1 = GateConv3D(in_channels=3, out_channels=64, kernel_size=(1, 7, 7), stride=1, padding=0) # [2, 3, 246, 438] => [2, 64, 240, 432]
+        self.conv1 = GateConv3D(in_channels=3, out_channels=self.channel1, kernel_size=(1, 7, 7), stride=1, padding=0) # [2, 3, 246, 438] => [2, 64, 240, 432]
+        # self.bn1 = nn.BatchNorm3d(64) # [2, 64, 240, 432]
+        self.bn1 = nn.BatchNorm3d(self.channel1) # [2, 64, 240, 432]
         self.act = nn.ReLU(True) # [2, 64, 240, 432]
 
-        self.conv2 = GateConv3D(in_channels=64, out_channels=128, kernel_size=(1, 4, 4), stride=2, padding=(2, 1, 1)) # [2, 64, 240, 432] => [2, 128, 120, 216]
-        self.bn2 = nn.BatchNorm3d(128)
+        # self.conv2 = GateConv3D(in_channels=64, out_channels=128, kernel_size=(1, 4, 4), stride=2, padding=(2, 1, 1)) # [2, 64, 240, 432] => [2, 128, 120, 216]
+        self.conv2 = GateConv3D(in_channels=self.channel1, out_channels=self.channel2, kernel_size=(1, 4, 4), stride=2, padding=(2, 1, 1)) # [2, 64, 240, 432] => [2, 128, 120, 216]
+        # self.bn2 = nn.BatchNorm3d(128)
+        self.bn2 = nn.BatchNorm3d(self.channel2)
 
-        self.conv3 = nn.Conv3d(in_channels=128, out_channels=256, kernel_size=(1, 4, 4), stride=2, padding=(2, 1, 1))
-        self.bn3 = nn.BatchNorm3d(256)
+        # self.conv3 = nn.Conv3d(in_channels=128, out_channels=256, kernel_size=(1, 4, 4), stride=2, padding=(2, 1, 1))
+        self.conv3 = nn.Conv3d(in_channels=self.channel2, out_channels=self.channel3, kernel_size=(1, 4, 4), stride=2, padding=(2, 1, 1))
+        # self.bn3 = nn.BatchNorm3d(256)
+        self.bn3 = nn.BatchNorm3d(self.channel3)
 
-        self.conv4 = nn.Conv3d(in_channels=256, out_channels=512, kernel_size=(1, 4, 4), stride=2, padding=(2, 1, 1))
-        self.bn4 = nn.BatchNorm3d(512)
+        # self.conv4 = nn.Conv3d(in_channels=256, out_channels=512, kernel_size=(1, 4, 4), stride=2, padding=(2, 1, 1))
+        self.conv4 = nn.Conv3d(in_channels=self.channel3, out_channels=self.channel4, kernel_size=(1, 4, 4), stride=2, padding=(2, 1, 1))
+        # self.bn4 = nn.BatchNorm3d(512)
+        self.bn4 = nn.BatchNorm3d(self.channel4)
 
         blocks = []
         # resnet blocks
@@ -671,9 +715,9 @@ class StructureEncoder_video_3D(nn.Module):
 
         stack_num = 3
         n_vecs = config.ref_frame_num*30*54
-        hidden = 512
+        hidden = self.channel4 # origin 512
         for _ in range(stack_num):
-            blocks.append(TransformerBlock(hidden=512, num_head=4, dropout=0.1))
+            blocks.append(TransformerBlock(hidden=self.channel4, num_head=4, dropout=0.1)) # origin hidden 512
         self.transformer = nn.Sequential(*blocks)
         
         self.add_pos_emb = AddPosEmb(n_vecs, hidden)
@@ -681,22 +725,31 @@ class StructureEncoder_video_3D(nn.Module):
         # self.middle = nn.Sequential(*blocks)
         self.alpha1 = nn.Parameter(torch.tensor(0, dtype=torch.float32), requires_grad=True)
 
-        self.convt1 = GateConv3D(512, 256, kernel_size=(1, 4, 4), stride=2, padding=(2, 1, 1), transpose=True)
-        self.bnt1 = nn.BatchNorm3d(256)
+        # self.convt1 = GateConv3D(512, 256, kernel_size=(1, 4, 4), stride=2, padding=(2, 1, 1), transpose=True)
+        # self.bnt1 = nn.BatchNorm3d(256)
+        self.convt1 = GateConv3D(self.channel4, self.channel3, kernel_size=(1, 4, 4), stride=2, padding=(2, 1, 1), transpose=True)
+        self.bnt1 = nn.BatchNorm3d(self.channel3)
         self.alpha2 = nn.Parameter(torch.tensor(0, dtype=torch.float32), requires_grad=True)
 
-        self.convt2 = GateConv3D(256, 128, kernel_size=(1, 4, 4), stride=2, padding=(2, 1, 1), transpose=True)
-        self.bnt2 = nn.BatchNorm3d(128)
+        # self.convt2 = GateConv3D(256, 128, kernel_size=(1, 4, 4), stride=2, padding=(2, 1, 1), transpose=True)
+        # self.bnt2 = nn.BatchNorm3d(128)
+        self.convt2 = GateConv3D(self.channel3, self.channel2, kernel_size=(1, 4, 4), stride=2, padding=(2, 1, 1), transpose=True)
+        self.bnt2 = nn.BatchNorm3d(self.channel2)
         self.alpha3 = nn.Parameter(torch.tensor(0, dtype=torch.float32), requires_grad=True)
 
-        self.convt3 = GateConv3D(128, 64, kernel_size=(1, 4, 4), stride=2, padding=(2, 1, 1), transpose=True)
-        self.bnt3 = nn.BatchNorm3d(64)
+        # self.convt3 = GateConv3D(128, 64, kernel_size=(1, 4, 4), stride=2, padding=(2, 1, 1), transpose=True)
+        # self.bnt3 = nn.BatchNorm3d(64)
+        self.convt3 = GateConv3D(self.channel2, self.channel1, kernel_size=(1, 4, 4), stride=2, padding=(2, 1, 1), transpose=True)
+        self.bnt3 = nn.BatchNorm3d(self.channel1)
         self.alpha4 = nn.Parameter(torch.tensor(0, dtype=torch.float32), requires_grad=True)
 
         if self.rezero_for_mpe:
+            # self.rel_pos_emb = MaskedSinusoidalPositionalEmbedding(num_embeddings=config.rel_pos_num,
+            #                                                        embedding_dim=64)
+            # self.direct_emb = MultiLabelEmbedding(num_positions=4, embedding_dim=64)
             self.rel_pos_emb = MaskedSinusoidalPositionalEmbedding(num_embeddings=config.rel_pos_num,
-                                                                   embedding_dim=64)
-            self.direct_emb = MultiLabelEmbedding(num_positions=4, embedding_dim=64)
+                                                                   embedding_dim=self.channel1)
+            self.direct_emb = MultiLabelEmbedding(num_positions=4, embedding_dim=self.channel1)
             self.alpha5 = nn.Parameter(torch.tensor(0, dtype=torch.float32), requires_grad=True)
             self.alpha6 = nn.Parameter(torch.tensor(0, dtype=torch.float32), requires_grad=True)
 
@@ -836,30 +889,37 @@ class NLayerDiscriminator(nn.Module):
         return outputs, [conv1, conv2, conv3, conv4, conv5]
 
 class NLayerDiscriminator_video_2D(nn.Module):
-    def __init__(self, input_nc):
+    def __init__(self, config):
         super().__init__()
         kw = 4
         padw = int(np.ceil((kw - 1.0) / 2))
 
+        self.input_nc = config.discriminator['input_nc']
+
+        self.channel1 = config.generator['ngf']
+        self.channel2 = self.channel1 * 2
+        self.channel3 = self.channel2 * 2
+        self.channel4 = self.channel3 * 2
+
         self.conv1 = nn.Sequential(
-            nn.Conv2d(in_channels=input_nc, out_channels=64, kernel_size=kw, stride=2, padding=padw),
+            nn.Conv2d(in_channels=self.input_nc, out_channels=self.channel1, kernel_size=kw, stride=2, padding=padw),
             nn.LeakyReLU(0.2, inplace=True),
         )
 
         self.act = nn.LeakyReLU(0.2, inplace=True)
-        self.conv2 = nn.Conv2d(in_channels=64, out_channels=128, kernel_size=kw, stride=2, padding=padw)
-        self.bn2 = nn.BatchNorm2d(128)
+        self.conv2 = nn.Conv2d(in_channels=self.channel1, out_channels=self.channel2, kernel_size=kw, stride=2, padding=padw)
+        self.bn2 = nn.BatchNorm2d(self.channel2)
 
-        self.conv3 = nn.Conv2d(in_channels=128, out_channels=256, kernel_size=kw, stride=2, padding=padw)
-        self.bn3 = nn.BatchNorm2d(256)
+        self.conv3 = nn.Conv2d(in_channels=self.channel2, out_channels=self.channel3, kernel_size=kw, stride=2, padding=padw)
+        self.bn3 = nn.BatchNorm2d(self.channel3)
 
-        self.conv4 = nn.Conv2d(in_channels=256, out_channels=512, kernel_size=kw, stride=2, padding=padw)
-        self.bn4 = nn.BatchNorm2d(512)
+        self.conv4 = nn.Conv2d(in_channels=self.channel3, out_channels=self.channel4, kernel_size=kw, stride=2, padding=padw)
+        self.bn4 = nn.BatchNorm2d(self.channel4)
 
-        self.conv5 = nn.Conv2d(in_channels=512, out_channels=512, kernel_size=kw, stride=1, padding=padw)
-        self.bn5 = nn.BatchNorm2d(512)
+        self.conv5 = nn.Conv2d(in_channels=self.channel4, out_channels=self.channel4, kernel_size=kw, stride=1, padding=padw)
+        self.bn5 = nn.BatchNorm2d(self.channel4)
 
-        self.conv6 = nn.Conv2d(512, 1, kernel_size=kw, stride=1, padding=padw)
+        self.conv6 = nn.Conv2d(self.channel4, 1, kernel_size=kw, stride=1, padding=padw)
 
     def forward(self, x):
         b, t, c, h, w = x.shape
