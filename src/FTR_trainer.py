@@ -14,6 +14,7 @@ from .utils import *
 
 from skimage.metrics import structural_similarity as measure_ssim
 from skimage.metrics import peak_signal_noise_ratio as measure_psnr
+import datetime
 
 class LaMa:
     def __init__(self, config, gpu, rank, test=False):
@@ -582,6 +583,25 @@ def get_ref_index(length, sample_length):
             ref_index = [pivot+i for i in range(sample_length)]
         return ref_index
 
+# sample reference frames from the whole video 
+def get_ref_index_fuseformer(f, neighbor_ids, length):
+    ref_index = []
+    ref_length = 10
+    num_ref = -1
+    if num_ref == -1: 
+        for i in range(0, length, ref_length): # sample from 0 to length with interval ref_length, try to get the whole story
+            if not i in neighbor_ids:
+                ref_index.append(i)
+    else:
+        start_idx = max(0, f - ref_length * (num_ref//2))
+        end_idx = min(length, f + ref_length * (num_ref//2))
+        for i in range(start_idx, end_idx+1, ref_length):
+            if not i in neighbor_ids:
+                ref_index.append(i)
+                if len(ref_index) >= num_ref:
+                    break
+    return ref_index
+
 class ZITS_video:
     def __init__(self, args, config, gpu, rank, test=False, single_img_test=False):
         self.config = config
@@ -658,12 +678,12 @@ class ZITS_video:
 
     def train(self):
         if self.config.DDP:
-            train_loader = DataLoader(self.train_dataset, shuffle=False, pin_memory=True,
+            train_loader = DataLoader(self.train_dataset, shuffle=False, pin_memory=False,
                                       batch_size=self.config.BATCH_SIZE // self.config.world_size,
                                       num_workers=12, sampler=self.train_sampler)
             
         else:
-            train_loader = DataLoader(self.train_dataset, pin_memory=True,
+            train_loader = DataLoader(self.train_dataset, pin_memory=False,
                                       batch_size=self.config.BATCH_SIZE, num_workers=12,
                                       sampler=self.train_sampler)
         epoch = self.inpaint_model.iteration // len(train_loader)
@@ -781,7 +801,7 @@ class ZITS_video:
         print('\nEnd training....')
 
     def eval(self):
-        val_loader = DataLoader(self.val_dataset, shuffle=False, pin_memory=True,
+        val_loader = DataLoader(self.val_dataset, shuffle=False, pin_memory=False,
                                 batch_size=self.config.BATCH_SIZE, num_workers=12)
 
         self.inpaint_model.eval()  # set model to eval mode
@@ -816,8 +836,10 @@ class ZITS_video:
                 outputs_merged = (items['predicted_video'] * items['masks']) + (items['frames'] * (1 - items['masks']))
 
                 # save
+                outputs_merged = ( outputs_merged + 1 ) / 2 # [-1, 1] -> [0, 1]
                 outputs_merged *= 255.0
                 outputs_merged = outputs_merged.permute(0, 1, 3, 4, 2).int().cpu().numpy()
+                items['frames'] = ( items['frames'] + 1 ) / 2 # [-1, 1] -> [0, 1] 
                 items['frames'] *= 255
                 items['frames'] = items['frames'].permute(0, 1, 3, 4, 2).int().cpu().numpy()
                 ssim, s_psnr = 0., 0.
@@ -852,7 +874,7 @@ class ZITS_video:
                 ssim_all += ssim
                 s_psnr_all += s_psnr
 
-        vfid_score = get_fid_score(real_i3d_activations, output_i3d_activations)
+        vfid_score = get_fid_score(real_i3d_activations, output_i3d_activations) / self.config.BATCH_SIZE
         ssim_final = ssim_all/(len(val_loader)*self.sample_length*self.config.BATCH_SIZE)
         s_psnr_final = s_psnr_all/(len(val_loader)*self.sample_length*self.config.BATCH_SIZE)
         
@@ -936,3 +958,194 @@ class ZITS_video:
         img = img * 255.0
         img = img.permute(0, 2, 3, 1)
         return img.int()
+
+    def eval_whole_video(self):
+        self.inpaint_model.eval()  # set model to eval mode
+
+        frame_list, mask_list, edge_list, line_list = get_frame_mask_edge_line_list(self.args) # get frame and mask list
+        assert len(frame_list) == len(mask_list) # check if the number of frames and masks are the same
+        video_num = len(frame_list) # number of videos
+
+        ssim_all, psnr_all, len_all = 0., 0., 0. 
+        s_psnr_all = 0. 
+        video_length_all = 0 
+        vfid = 0.
+        output_i3d_activations = []
+        real_i3d_activations = []
+
+        for video_no in tqdm(range(video_num)): # iterate over all videos
+            video_name = frame_list[video_no].split("/")[-1]
+            print("[Processing: {}]".format(video_name)) # print video name
+            print(video_no) # print video number
+
+            # create a timestamp string for the current date
+            timestamp = datetime.datetime.now().strftime("%Y-%m-%d_")
+            input_name = self.args.input.split("/")[-1]
+            save_result_dir = os.path.join("./results", self.args.model_name, timestamp+input_name, frame_list[video_no].split("/")[-1]) # save result directory
+            if not os.path.exists(save_result_dir):
+                os.makedirs(save_result_dir)
+            
+            frames_PIL, idx_lst = read_frame_from_videos(frame_list[video_no], self.w, self.h) # read frames from video
+            video_length = len(frames_PIL) # get video length, how many frames in this video
+
+            imgs = to_tensors(frames_PIL).unsqueeze(0)*2-1 # convert frames to tensors and normalize to [-1, 1]
+            # imgs = to_tensors(frames_PIL).unsqueeze(0) # convert frames to tensors and normalize to [-1, 1]
+            frames = [np.array(f).astype(np.uint8) for f in frames_PIL] # convert frames to numpy array
+
+            masks = read_mask(mask_list[video_no], self.w, self.h)    
+            binary_masks = [np.expand_dims((np.array(m) != 0).astype(np.uint8), 2) for m in masks] # convert masks to numpy array
+            masks = to_tensors(masks).unsqueeze(0) # convert masks to tensors
+
+            edges, lines = read_edge_line_PIL(edge_list[video_no], line_list[video_no], self.w, self.h)
+            edges = to_tensors(edges).unsqueeze(0)
+            lines = to_tensors(lines).unsqueeze(0)
+
+            comp_frames = [None]*video_length # initialize completed frames
+
+            for f in tqdm(range(0, video_length)): # iterate over all frames in this video, neighbor_stride=5
+                # FuseFormer version
+                neighbor_ids = [i for i in range(max(0, f-self.neighbor_stride), min(video_length, f+self.neighbor_stride+1))] # get neighbor frames
+                ref_ids = get_ref_index_fuseformer(f, neighbor_ids, video_length) # get reference frames, approximate the whole story of the video
+                len_temp = len(neighbor_ids) + len(ref_ids) # get the number of frames used for inpainting
+
+                if f in neighbor_ids:
+                    neighbor_ids.remove(f)
+
+                if f in ref_ids:
+                    ref_ids.remove(f)
+
+                # neighbor_ids = random.sample(neighbor_ids, int(self.sample_length/2)) # randomly select neighbor frames
+                # ref_ids = random.sample(ref_ids, int(self.sample_length/2))
+
+                # revised 
+                sample_length_half = int(self.sample_length/2)
+                if len(neighbor_ids) >= sample_length_half and len(ref_ids) >= sample_length_half:
+                    # 兩者皆大於則照原本的程式
+                    neighbor_ids = random.sample(neighbor_ids, sample_length_half)  # randomly select neighbor frames
+                    ref_ids = random.sample(ref_ids, sample_length_half)
+                else:
+                    if len(ref_ids) < len(neighbor_ids):
+                        shortage = sample_length_half - len(ref_ids)
+                        neighbor_ids = random.sample(neighbor_ids, sample_length_half+shortage)
+                    else:
+                        shortage = sample_length_half - len(neighbor_ids)
+                        ref_ids = random.sample(ref_ids, sample_length_half+shortage)
+                # revised 
+
+                reference_frames = [ f ] + neighbor_ids + ref_ids # get reference frames
+                reference_frames.sort() # sort reference frames
+                # print(f"reference_frames: {reference_frames}") # test
+
+                selected_imgs = imgs[:1, reference_frames, :, :, :] # select frames for inpainting with neighbor frames and reference frames
+                selected_masks = masks[:1, reference_frames, :, :, :] # select masks for inpainting 
+                # print(f"selected_masks: {selected_masks[0][0]}") # test
+                selected_edges = edges[:1, reference_frames, :, :, :]
+                selected_lines = lines[:1, reference_frames, :, :, :]
+
+                # ZITS version of seleting reference frames
+                # neighbor_ids = get_ref_index(video_length, self.sample_length)
+                # selected_imgs = imgs[:1, neighbor_ids, :, :, :] # select frames for inpainting with neighbor frames and reference frames
+                # selected_masks = masks[:1, neighbor_ids, :, :, :] # select masks for inpainting 
+                # selected_edges = edges[:1, neighbor_ids, :, :, :]
+                # selected_lines = lines[:1, neighbor_ids, :, :, :]
+
+                with torch.no_grad():
+                    selected_imgs, selected_masks = selected_imgs.to(self.device), selected_masks.to(self.device) # move tensors to GPU
+                    selected_edges, selected_lines = selected_edges.to(self.device), selected_lines.to(self.device)
+                    edge_pred, line_pred = SampleEdgeLineLogits_video(self.inpaint_model.transformer,
+                    context=[selected_imgs.to(torch.float16), selected_edges.to(torch.float16), selected_lines.to(torch.float16)], 
+                    masks=selected_masks.to(torch.float16), iterations=5, add_v=0.05, mul_v=4, device=self.device)   
+                    edge_pred, line_pred = edge_pred.detach().to(torch.float32), line_pred.detach().to(torch.float32)
+                    selected_edges = selected_edges.detach()
+                    selected_lines = selected_lines.detach()
+
+                    items = dict()
+                    items['frames'] = selected_imgs
+                    items['masks'] = selected_masks
+                    items['edges'] = selected_edges
+                    items['lines'] = selected_lines
+                    items['name'] = video_name
+                    # batch['idxs'] = selected_idx
+
+                    # load pos encoding
+                    rel_pos_list, abs_pos_list, direct_list = [], [], []
+                    for m in selected_masks[0]:
+                        # transfrom mask to numpy array
+                        rel_pos, abs_pos, direct = load_masked_position_encoding(np.array(m.cpu()).squeeze(0), self.input_size, self.pos_num, self.str_size)
+                        # transfer tensor [4, 256, 256] to [4, 1, 1, 256, 256]
+                        rel_pos = torch.from_numpy(rel_pos).unsqueeze(0)
+                        abs_pos = torch.from_numpy(abs_pos).unsqueeze(0)
+                        direct = torch.from_numpy(direct).unsqueeze(0)
+
+                        rel_pos_list.append(rel_pos)
+                        abs_pos_list.append(abs_pos)
+                        direct_list.append(direct)
+
+                    # concat rel_pos, abs_pos, direct individually in dimention 1
+                    rel_pos_list = torch.cat(rel_pos_list, dim=0).unsqueeze(0)
+                    abs_pos_list = torch.cat(abs_pos_list, dim=0).unsqueeze(0)
+                    direct_list = torch.cat(direct_list, dim=0).unsqueeze(0)
+
+                    items['rel_pos'] = rel_pos_list.clone().to(torch.long).to(self.device)
+                    items['abs_pos'] = abs_pos_list.clone().to(torch.long).to(self.device)
+                    items['direct'] = direct_list.clone().to(torch.long).to(self.device)
+
+                    # print(f"items['name']: {items['name']}")
+                    # print(f"items['frames'].shape: {items['frames'].shape}")
+                    # print(f"items['masks'].shape: {items['masks'].shape}")
+                    # print(f"items['edges'].shape: {items['edges'].shape}")
+                    # print(f"items['lines'].shape: {items['lines'].shape}")
+                    # print(f"items['rel_pos'].shape: {items['rel_pos'].shape}")
+                    # print(f"items['abs_pos'].shape: {items['abs_pos'].shape}")
+                    # print(f"items['direct'].shape: {items['direct'].shape}")
+
+                    items = self.inpaint_model(items)
+                    outputs_merged = (items['predicted_video'] * items['masks']) + (items['frames'] * (1 - items['masks']))
+
+                    outputs_merged = ( outputs_merged + 1 ) / 2 # [-1, 1] -> [0, 1] # test
+                    outputs_merged *= 255.0
+                    outputs_merged = outputs_merged.squeeze(0) # get rid of the batch dimension
+                    outputs_merged = outputs_merged.int().cpu().permute(0, 2, 3, 1).numpy()
+                    for i in range(len(reference_frames)): # iterate over all reference frames
+                        idx = reference_frames[i] # get the index of the neighbor frame
+                        img = np.array(outputs_merged[i]).astype( 
+                            np.uint8)*binary_masks[idx] + frames[idx] * (1-binary_masks[idx]) # get the inpainted frame
+                        if comp_frames[idx] is None: # if the completed frame is None, initialize it
+                            comp_frames[idx] = img 
+                        else: 
+                            comp_frames[idx] = comp_frames[idx].astype(
+                                np.float32)*0.5 + img.astype(np.float32)*0.5 # inpainted multiple times, and get the average result
+                        # comp_frames[idx] = img # test without average
+
+            ssim, psnr, s_psnr = 0., 0., 0. 
+            comp_PIL = [] 
+            for f in range(video_length): # iterate over all frames in this video
+                comp = comp_frames[f] # get the completed frame
+                comp = cv2.cvtColor(np.array(comp).astype(np.uint8), cv2.COLOR_BGR2RGB) # convert the completed frame to RGB
+                print(f"save in {os.path.join(save_result_dir, idx_lst[f])}")
+                cv2.imwrite(os.path.join(save_result_dir, idx_lst[f]), comp) # save the completed frame
+                new_comp = cv2.imread(os.path.join(save_result_dir, idx_lst[f])) # read the saved completed frame
+                new_comp = Image.fromarray(cv2.cvtColor(new_comp, cv2.COLOR_BGR2RGB)) # convert the completed frame to RGB
+                comp_PIL.append(new_comp) # append the completed frame to the list
+
+                gt = cv2.cvtColor(np.array(frames[f]).astype(np.uint8), cv2.COLOR_BGR2RGB) # convert the ground truth frame to RGB
+                ssim += measure_ssim(comp, gt, data_range=255, multichannel=True, win_size=65) # compute SSIM
+                s_psnr += measure_psnr(comp, gt, data_range=255) # compute PSNR
+
+            ssim_all += ssim
+            s_psnr_all += s_psnr
+            video_length_all += (video_length)
+            # FVID computation
+            imgs = to_tensors(comp_PIL).unsqueeze(0).to(self.device)
+            gts = to_tensors(frames_PIL).unsqueeze(0).to(self.device)
+            output_i3d_activations.append(get_i3d_activations(imgs).cpu().numpy().flatten())
+            real_i3d_activations.append(get_i3d_activations(gts).cpu().numpy().flatten())
+            fid_score_tmp = get_fid_score(real_i3d_activations, output_i3d_activations) # test
+            if video_no % 50 ==1:
+                print("video no[{}]: ssim {}, psnr {}, vfid {}".format(video_no, ssim_all/video_length_all, s_psnr_all/video_length_all, fid_score_tmp))
+
+        ssim_final = ssim_all/video_length_all*self.sample_length*self.config.BATCH_SIZE
+        psnr_final = s_psnr_all/video_length_all*self.sample_length*self.config.BATCH_SIZE
+        vfid_score = get_fid_score(real_i3d_activations, output_i3d_activations) / self.config.BATCH_SIZE
+        print("[Finish evaluating, ssim is {}, psnr is {}]".format(ssim_final, psnr_final))
+        print("[fvid score is {}]".format(vfid_score))

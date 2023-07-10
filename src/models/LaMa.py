@@ -423,7 +423,7 @@ class ReZeroFFC_video_2D(LaMa_model_video_2D):
         x = self.padt(x)
         x = self.convt4(x)
         x = self.act_last(x)
-        x = (x + 1) / 2
+        # x = (x + 1) / 2
         x = x.view(b, t, 3, h, w)
         return x
 
@@ -490,7 +490,14 @@ class StructureEncoder(nn.Module):
         self.channel4 = self.channel3 * 2
 
         self.pad1 = nn.ReflectionPad2d(3)
-        self.conv1 = GateConv(in_channels=3, out_channels=self.channel1, kernel_size=7, stride=1, padding=0)
+        
+        if config.use_SPI:
+            self.use_SPI = True
+            self.conv1 = GateConv(in_channels=3, out_channels=self.channel1, kernel_size=7, stride=1, padding=0)
+        else:
+            self.use_SPI = False
+            self.conv1 = GateConv(in_channels=2, out_channels=self.channel1, kernel_size=7, stride=1, padding=0)
+        
         self.bn1 = nn.BatchNorm2d(self.channel1)
         self.act = nn.ReLU(True)
 
@@ -532,8 +539,8 @@ class StructureEncoder(nn.Module):
 
     def forward(self, x, rel_pos=None, direct=None):
         # x = torch.cat([batch['edges'], batch['lines'], mask], dim=2) # [B, T, 3, H, W] for video 
-        if not self.config.use_SPI:  # never mind the mask
-            x = x[:, :, :2, :, :]
+        if not self.use_SPI:  # never mind the mask
+            x = x[:, :2, :, :]
 
         # print(f"2D original shape: {x.shape}") # test
         # print(f"1 pad before: {x.shape}") # test

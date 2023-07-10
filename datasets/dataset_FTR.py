@@ -729,7 +729,7 @@ class DynamicDataset_video(torch.utils.data.Dataset):
             # masks = GroupRandomHorizontalFlip()(masks, prob)
 
         batch = dict()
-        batch['frames'] = self._to_tensors(frames) # normalize to [-1, 1]
+        batch['frames'] = self._to_tensors(frames)*2.0 - 1.0 # normalize to [-1, 1]
         # batch['frames_256'] = self._to_tensors(frames_256)*2.0 - 1.0 # normalize to [-1, 1]
         batch['masks'] = self._to_tensors(masks)
         # batch['masks_256'] = self._to_tensors(masks_256)

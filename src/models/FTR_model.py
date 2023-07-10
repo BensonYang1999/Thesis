@@ -325,7 +325,13 @@ class BaseInpaintingTrainingModule_video(nn.Module):
         self.gen_weights_path = os.path.join(config.PATH, name + '_gen.pth')
         self.dis_weights_path = os.path.join(config.PATH, name + '_dis.pth')
 
-        self.str_encoder = StructureEncoder_video_3D(config).cuda(gpu) # structure encoder for one image
+        if config.SFE_structure == "resnet":
+            print("Using ResNet as structure encoder")
+            self.str_encoder = StructureEncoder_video_2D(config).cuda(gpu) # ResNet version
+        else: #  config.SFE_structure == "transformer"
+            print("Using Transformer as structure encoder")
+            self.str_encoder = StructureEncoder_video_3D(config).cuda(gpu) # Transformer version
+
         self.generator = ReZeroFFC_video_2D(config).cuda(gpu) # generator
         self.best = None
 
@@ -348,7 +354,7 @@ class BaseInpaintingTrainingModule_video(nn.Module):
 
         if not test:
             # self.discriminator = NLayerDiscriminator_video(**self.config.discriminator).cuda(gpu) 
-            self.discriminator = NLayerDiscriminator_video_2D(**self.config.discriminator).cuda(gpu) 
+            self.discriminator = NLayerDiscriminator_video_2D(config).cuda(gpu) 
             # self.discriminator = net.Discriminator(
             #     in_channels=3, use_sigmoid=config['losses']['GAN_LOSS'] != 'hinge').cuda(gpu)  # video version referr to FuseFormer
             self.adversarial_loss = NonSaturatingWithR1_video_2D(**self.config.losses['adversarial'])
@@ -432,7 +438,7 @@ class BaseInpaintingTrainingModule_video(nn.Module):
 
     def load(self):
         if self.test:
-            self.gen_weights_path = os.path.join(self.config.PATH, self.name + '_best_gen.pth')
+            self.gen_weights_path = os.path.join(self.config.PATH, self.name + '_best_gen_HR.pth')
             print('Loading %s generator...' % self.name)
             data = torch.load(self.gen_weights_path, map_location='cpu')
             self.generator.load_state_dict(data['generator'])
