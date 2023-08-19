@@ -10,6 +10,7 @@ round: 64
 rezero_for_mpe: True
 
 SFE_structure: resnet # or transformer
+use_SPI: True # use the structure pre-inpainted image
 
 # model_name: '0522_ZITS_video_firstTry'
 transformer_ckpt_path: './ckpt/0521_ZITS_video_YouTubeVOS_08hole_02valid_1edge_1line_minMaxNorm_oldEdge_bs2_bce/best.pth'
@@ -36,13 +37,12 @@ structure_upsample_path: './ckpt/StructureUpsampling.pth'
 BATCH_SIZE: 2                 # input batch size for training
 # INPUT_SIZE: 512               # input image size for training 0 for original size
 INPUT_SIZE: 256               # input image size for training 0 for original size
-START_ITERS: 800000             # start iters for lama
-# MIX_ITERS: 808000                # gradually mix the edge and line with prediction from transformer
-# MIX_ITERS: 600000                # gradually mix the edge and line with prediction from transformer
 MIX_ITERS: 91600                # gradually mix the edge and line with prediction from transformer
 Turning_Point: 94000            # only use the predict from transformer for edge and line
-# MAX_ITERS: 850001                # maximum number of iterations to train the model
 MAX_ITERS: 100000                # maximum number of iterations to train the model
+# MIX_ITERS: 458000                # gradually mix the edge and line with prediction from transformer
+# Turning_Point: 470000            # only use the predict from transformer for edge and line
+# MAX_ITERS: 500000                # maximum number of iterations to train the model
 
 SAVE_INTERVAL: 1000           # how many iterations to wait before saving model (0: never)
 # SAMPLE_INTERVAL: 1000         # how many iterations to wait before sampling (0: never)
@@ -91,7 +91,7 @@ optimizers:
 generator:
   input_nc: 4
   output_nc: 3
-  ngf: 64
+  ngf: 64  # 64 means the middle layer has 512 channels
   n_downsampling: 3
   n_blocks: 9
   add_out_act: sigmoid

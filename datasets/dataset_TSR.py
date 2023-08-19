@@ -291,6 +291,11 @@ class ContinuousEdgeLineDatasetMask_video(Dataset):  # mostly refer to FuseForme
             self.edge_names = [os.path.join(edge_lst_prefix, name) for name in edge_lst]
             self.line_names = [os.path.join(line_lst_prefix, name) for name in line_lst]
 
+            if not split == 'train':
+                mask_lst_prefix = os.path.join(root, name, split+'_all_frames/mask_random')
+                mask_lst = os.listdir(mask_lst_prefix)
+                self.mask_names = [os.path.join(mask_lst_prefix, name) for name in mask_lst]
+
         self._to_tensors = transforms.Compose([
             Stack(),
             ToTorchFormatTensor(), ])
@@ -328,8 +333,13 @@ class ContinuousEdgeLineDatasetMask_video(Dataset):  # mostly refer to FuseForme
         all_frames = [os.path.join(video_name, name) for name in sorted(os.listdir(video_name))]
         all_edges = [os.path.join(edge_name, name) for name in sorted(os.listdir(edge_name))]
         all_lines = [os.path.join(line_name, name) for name in sorted(os.listdir(line_name))]
-        all_masks = create_random_shape_with_random_motion(
-            len(all_frames), imageHeight=self.h, imageWidth=self.w)
+        if self.split=="train":
+            all_masks = create_random_shape_with_random_motion(
+                len(all_frames), imageHeight=self.h, imageWidth=self.w)
+        else:
+            mask_name = self.mask_names[index]
+            all_masks = [os.path.join(mask_name, name) for name in sorted(os.listdir(mask_name))]
+
         ref_index = self.get_ref_index(len(all_frames), self.sample_length)
         frames = []
         edges = []
@@ -348,7 +358,18 @@ class ContinuousEdgeLineDatasetMask_video(Dataset):  # mostly refer to FuseForme
             line = line.resize(self.size)
             lines.append(line)
 
-            masks.append(all_masks[idx])
+            if self.split == 'train':
+                masks.append(all_masks[idx])
+            else:
+                mask = Image.open(all_masks[idx]).convert('L')
+                # make sure the value of mask is either 0 or 255
+                mask = np.array(mask)
+                mask[mask > 0] = 255
+                mask = Image.fromarray(mask)
+                mask = mask.resize(self.size)
+                masks.append(mask)
+            # masks.append(all_masks[idx])
+
         if self.split == 'train':
             prob = random.random()
             frames = GroupRandomHorizontalFlip()(frames, prob)

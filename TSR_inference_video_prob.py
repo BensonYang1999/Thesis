@@ -26,6 +26,8 @@ if __name__ == '__main__':
     parser.add_argument('--ref_frame_num', type=int, default=5)
     parser.add_argument('--loss_choice', type=str, default="bce", help='the choice of loss function: l1, mse, bce')
     parser.add_argument('--edge_gaussian', type=int, default=0, help='the sigma of gaussian kernel for edge')
+    parser.add_argument("--model", type=str, default='fuseformer')
+    parser.add_argument("-v", "--video", type=str, required=True)
 
     opts = parser.parse_args()
 
@@ -39,7 +41,7 @@ if __name__ == '__main__':
     IGPT_model.load_state_dict(checkpoint if opts.ckpt_path.endswith('.pt') else checkpoint['model'])
     IGPT_model.to("cuda")
 
-    test_dataset = ContinuousEdgeLineDatasetMask_video(opts, sample=opts.ref_frame_num, size=(432, 240), split='test', name=opts.dataset_name, root=opts.dataset_root)
+    test_dataset = ContinuousEdgeLineDatasetMask_video(opts, sample=opts.ref_frame_num, size=(432, 240), split='valid', name=opts.dataset_name, root=opts.dataset_root)
     
 
     for it in tqdm(range(test_dataset.__len__())):
@@ -54,6 +56,11 @@ if __name__ == '__main__':
         edge_pred, line_pred = SampleEdgeLineLogits_video(IGPT_model, context=[items['frames'].unsqueeze(0),
                                                 items['edges'].unsqueeze(0), items['lines'].unsqueeze(0)],
                             masks=items['masks'].unsqueeze(0), iterations=opts.iterations)
+
+        # denormalize the result of edge_pred and line_pred with the above min-max normalization
+        # edge_pred = edge_pred * (edge_pred.max() - edge_pred.min()) + edge_pred.min()
+        # line_pred = line_pred * (line_pred.max() - line_pred.min()) + line_pred.min()
+
         for i, ref_idx in enumerate(items['idxs']):
             # save separately
             edge_output = edge_pred[0, i, ...].cpu() * items['masks'][i] + items['edges'][i] * (1 - items['masks'][i])

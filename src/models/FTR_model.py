@@ -745,7 +745,8 @@ class DefaultInpaintingTrainingModule_video(BaseInpaintingTrainingModule_video):
     def forward(self, batch):
         img = batch['frames'] # [B, 3, H, W] -> [B, T, 3, H, W] for video
         mask = batch['masks'] # [B, 1, H, W] -> [B, T, 1, H, W] for video
-        masked_img = img * (1 - mask) + mask # [B, T, 3, H, W] for video
+        # masked_img = img * (1 - mask) + mask # [B, T, 3, H, W] for video ======> old version before 0717
+        masked_img = img * (1 - mask) # [B, T, 3, H, W] for video
 
         masked_img = torch.cat([masked_img, mask], dim=2) # [B, T, 4, H, W] for video
         masked_str = torch.cat([batch['edges'], batch['lines'], mask], dim=2) # [B, T, 3, H, W] for video 

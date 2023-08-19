@@ -102,7 +102,7 @@ if __name__ == "__main__":
     parser.add_argument('--edge_gaussian', type=int, default=0, help='the sigma of gaussian kernel for edge')
     parser.add_argument('--input_size', type=tuple, default=(240,432))
     parser.add_argument('--dataset', type=str, default="youtubevos")
-    parser.add_argument("--neighbor_stride", type=int, default=1)
+    parser.add_argument("--neighbor_stride", type=int, default=5)
     args = parser.parse_args()
     
     args.path = os.path.join(args.path, args.model_name)
@@ -118,6 +118,7 @@ if __name__ == "__main__":
     args.config_path = config_path
 
     os.environ['CUDA_VISIBLE_DEVICES'] = args.GPU_ids
+    os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "max_split_size_mb=2048"
     if args.DDP:
         args.world_size = args.nodes * args.gpus
         os.environ['MASTER_ADDR'] = 'localhost'

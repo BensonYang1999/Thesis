@@ -16,6 +16,8 @@ from skimage.metrics import structural_similarity as measure_ssim
 from skimage.metrics import peak_signal_noise_ratio as measure_psnr
 import datetime
 
+import torchvision.utils
+
 class LaMa:
     def __init__(self, config, gpu, rank, test=False):
         self.config = config
@@ -211,6 +213,8 @@ class LaMa:
             inputs = (items['image'] * (1 - items['mask']))
             items = self.inpaint_model(items)
             outputs_merged = (items['predicted_image'] * items['mask']) + (items['image'] * (1 - items['mask']))
+            # convert to [0,1]
+            outputs_merged = (outputs_merged + 1) / 2
 
         if it is not None:
             iteration = it
@@ -921,6 +925,7 @@ class ZITS_video:
             inputs = (items['frames'] * (1 - items['masks']))
             items = self.inpaint_model(items)
             outputs_merged = (items['predicted_video'] * items['masks']) + (items['frames'] * (1 - items['masks']))
+            outputs_merged = ( outputs_merged + 1 ) / 2 # [-1, 1] -> [0, 1] # test
 
         if it is not None:
             iteration = it
@@ -931,12 +936,12 @@ class ZITS_video:
             
         for b in range(items['frames'].shape[0]):            
             images = stitch_images(
-                self.postprocess((items['frames'][b,:,...]).cpu()),
-                self.postprocess((inputs[b,:,...]).cpu()),
+                self.postprocess(((items['frames'][b,:,...] + 1) / 2).cpu()),
+                self.postprocess(((inputs[b,:,...] + 1 ) / 2).cpu()),
                 self.postprocess(items['edges'][b,:,...].cpu()),
                 self.postprocess(items['lines'][b,:,...].cpu()),
                 self.postprocess(items['masks'][b,:,...].cpu()),
-                self.postprocess((items['predicted_video'][b,:,...]).cpu()),
+                self.postprocess(((items['predicted_video'][b,:,...] + 1 ) / 2).cpu()),
                 self.postprocess((outputs_merged[b,:,...]).cpu()),
                 img_per_row=image_per_row
             )
@@ -1052,12 +1057,48 @@ class ZITS_video:
                 with torch.no_grad():
                     selected_imgs, selected_masks = selected_imgs.to(self.device), selected_masks.to(self.device) # move tensors to GPU
                     selected_edges, selected_lines = selected_edges.to(self.device), selected_lines.to(self.device)
+
+                    # selected_imgs = selected_imgs*(1-selected_masks) # add 7/17
+                    # selected_edges = selected_edges*(1-selected_masks) # add 7/17
+                    # selected_lines = selected_lines*(1-selected_masks) # add 7/17
                     edge_pred, line_pred = SampleEdgeLineLogits_video(self.inpaint_model.transformer,
                     context=[selected_imgs.to(torch.float16), selected_edges.to(torch.float16), selected_lines.to(torch.float16)], 
                     masks=selected_masks.to(torch.float16), iterations=5, add_v=0.05, mul_v=4, device=self.device)   
+                    # masks=selected_masks.to(torch.float16), iterations=5, add_v=0, mul_v=0, device=self.device)   
                     edge_pred, line_pred = edge_pred.detach().to(torch.float32), line_pred.detach().to(torch.float32)
-                    selected_edges = selected_edges.detach()
-                    selected_lines = selected_lines.detach()
+                    # selected_edges = selected_edges.detach()  # old version before 0818
+                    # selected_lines = selected_lines.detach()  # old version before 0818
+                    selected_edges = edge_pred * selected_masks + selected_edges * (1 - selected_masks)  # new version after 0818
+                    selected_lines = line_pred * selected_masks + selected_lines * (1 - selected_masks)  # new version after 0818
+
+                    # test whether the edge_pred and line_pred are correct
+                    # print(f"edge_pred: {edge_pred.shape}") # test
+                    # print(f"line_pred: {line_pred.shape}") # test
+                    # print(f"selected_edges: {selected_edges.shape}") # test
+                    # print(f"selected_lines: {selected_lines.shape}") # test
+                    # # show the max and min value of edge_pred and line_pred
+                    # print(f"edge_pred max: {torch.max(edge_pred)}") # test
+                    # print(f"edge_pred min: {torch.min(edge_pred)}") # test
+                    # print(f"line_pred max: {torch.max(line_pred)}") # test
+                    # print(f"line_pred min: {torch.min(line_pred)}") # test
+                    # print(f"selected_edges max: {torch.max(selected_edges)}") # test
+                    # print(f"selected_edges min: {torch.min(selected_edges)}") # test
+                    # print(f"selected_lines max: {torch.max(selected_lines)}") # test
+                    # print(f"selected_lines min: {torch.min(selected_lines)}") # test
+
+                    # for i in range(5):
+                    #     edge = selected_edges[0][i]
+                    #     pred_edge = edge_pred[0][i]
+                    #     line = selected_lines[0][i]
+                    #     pred_line = line_pred[0][i]
+                    #     torchvision.utils.save_image(edge, f"edge_{i}.png")
+                    #     torchvision.utils.save_image(pred_edge, f"pred_edge_{i}.png")
+                    #     torchvision.utils.save_image(line, f"line_{i}.png")
+                    #     torchvision.utils.save_image(pred_line, f"pred_line_{i}.png")
+                    #     print(f"edge_{i}.png saved")
+                    #     print(f"pred_edge_{i}.png saved")
+                    #     print(f"line_{i}.png saved")
+                    #     print(f"pred_line_{i}.png saved")
 
                     items = dict()
                     items['frames'] = selected_imgs
@@ -1100,6 +1141,7 @@ class ZITS_video:
                     # print(f"items['direct'].shape: {items['direct'].shape}")
 
                     items = self.inpaint_model(items)
+                    
                     outputs_merged = (items['predicted_video'] * items['masks']) + (items['frames'] * (1 - items['masks']))
 
                     outputs_merged = ( outputs_merged + 1 ) / 2 # [-1, 1] -> [0, 1] # test
@@ -1126,9 +1168,11 @@ class ZITS_video:
                 cv2.imwrite(os.path.join(save_result_dir, idx_lst[f]), comp) # save the completed frame
                 new_comp = cv2.imread(os.path.join(save_result_dir, idx_lst[f])) # read the saved completed frame
                 new_comp = Image.fromarray(cv2.cvtColor(new_comp, cv2.COLOR_BGR2RGB)) # convert the completed frame to RGB
+                # new_comp = Image.fromarray(comp) # test
                 comp_PIL.append(new_comp) # append the completed frame to the list
 
                 gt = cv2.cvtColor(np.array(frames[f]).astype(np.uint8), cv2.COLOR_BGR2RGB) # convert the ground truth frame to RGB
+                # gt = np.array(frames[f]).astype(np.uint8)
                 ssim += measure_ssim(comp, gt, data_range=255, multichannel=True, win_size=65) # compute SSIM
                 s_psnr += measure_psnr(comp, gt, data_range=255) # compute PSNR
 
@@ -1144,8 +1188,8 @@ class ZITS_video:
             if video_no % 50 ==1:
                 print("video no[{}]: ssim {}, psnr {}, vfid {}".format(video_no, ssim_all/video_length_all, s_psnr_all/video_length_all, fid_score_tmp))
 
-        ssim_final = ssim_all/video_length_all*self.sample_length*self.config.BATCH_SIZE
-        psnr_final = s_psnr_all/video_length_all*self.sample_length*self.config.BATCH_SIZE
+        ssim_final = ssim_all/(video_length_all*self.sample_length*self.config.BATCH_SIZE)
+        psnr_final = s_psnr_all/(video_length_all*self.sample_length*self.config.BATCH_SIZE)
         vfid_score = get_fid_score(real_i3d_activations, output_i3d_activations) / self.config.BATCH_SIZE
         print("[Finish evaluating, ssim is {}, psnr is {}]".format(ssim_final, psnr_final))
         print("[fvid score is {}]".format(vfid_score))
