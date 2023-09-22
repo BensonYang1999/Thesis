@@ -230,18 +230,19 @@ def random_move_control_points(X, Y, imageHeight, imageWidth, lineVelocity, regi
 
 if __name__=="__main__":
     # input is directory of RGB files
-    rgb_dir = "./datasets/YouTubeVOS/valid_all_frames/JPEGImages"
+    # rgb_dir = "./datasets/YouTubeVOS/test_all_frames/JPEGImages"
+    rgb_dir = "./datasets/DAVIS/JPEGImages/Full-Resolution"
 
     # get the parent folder of rgb_dir
-    mask_brush_dir = os.path.join(os.path.dirname(rgb_dir), "mask_brush")
+    # mask_brush_dir = os.path.join(os.path.dirname(rgb_dir), "mask_brush")
     mask_random_dir = os.path.join(os.path.dirname(rgb_dir), "mask_random")
     # make sure mask_dir exists
-    if not os.path.exists(mask_brush_dir):
-        os.makedirs(mask_brush_dir)
+    # if not os.path.exists(mask_brush_dir):
+        # os.makedirs(mask_brush_dir)
     if not os.path.exists(mask_random_dir):
         os.makedirs(mask_random_dir)
 
-    print("Generating brush masks...under folder: ", mask_brush_dir)
+    # print("Generating brush masks...under folder: ", mask_brush_dir)
     print("Generating random masks...under folder: ", mask_random_dir)
 
     brush_mask_generator = MaskGenerator(240, 432, 1, rand_seed=42)
@@ -251,11 +252,11 @@ if __name__=="__main__":
     # generate masks for each frame image and save them in the parent folder of rgb_dir
     for video_name in tqdm(os.listdir(rgb_dir)):
         video_dir = os.path.join(rgb_dir, video_name)
-        video_mask_brush_dir = os.path.join(mask_brush_dir, video_name)
+        # video_mask_brush_dir = os.path.join(mask_brush_dir, video_name)
         video_mask_random_dir = os.path.join(mask_random_dir, video_name)
         # make sure video_mask_dir exists
-        if not os.path.exists(video_mask_brush_dir):
-            os.makedirs(video_mask_brush_dir)
+        # if not os.path.exists(video_mask_brush_dir):
+            # os.makedirs(video_mask_brush_dir)
         if not os.path.exists(video_mask_random_dir):
             os.makedirs(video_mask_random_dir)
 
@@ -265,7 +266,7 @@ if __name__=="__main__":
 
         for i, frame_name in enumerate(os.listdir(video_dir)):
             frame_path = os.path.join(video_dir, frame_name)
-            mask_brush_path = os.path.join(video_mask_brush_dir, frame_name)
+            # mask_brush_path = os.path.join(video_mask_brush_dir, frame_name)
             mask_random_path = os.path.join(video_mask_random_dir, frame_name) 
             # mask = brush_mask_generator.sample()
             # cv2.imwrite(mask_brush_path, (1-mask)*255)

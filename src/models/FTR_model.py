@@ -747,9 +747,13 @@ class DefaultInpaintingTrainingModule_video(BaseInpaintingTrainingModule_video):
         mask = batch['masks'] # [B, 1, H, W] -> [B, T, 1, H, W] for video
         # masked_img = img * (1 - mask) + mask # [B, T, 3, H, W] for video ======> old version before 0717
         masked_img = img * (1 - mask) # [B, T, 3, H, W] for video
+        
+        # masked_edge = batch['edges'] * (1 - mask) # add at 8/19 when checking whether the edge/line have been correctly masked
+        # masked_line = batch['lines'] * (1 - mask) # add at 8/19 when checking whether the edge/line have been correctly masked
 
         masked_img = torch.cat([masked_img, mask], dim=2) # [B, T, 4, H, W] for video
-        masked_str = torch.cat([batch['edges'], batch['lines'], mask], dim=2) # [B, T, 3, H, W] for video 
+        masked_str = torch.cat([batch['edges'], batch['lines'], mask], dim=2) # [B, T, 3, H, W] for video  ======> old version before 0819
+        # masked_str = torch.cat([masked_edge, masked_line, mask], dim=2) # [B, T, 3, H, W] for video
         if self.config.rezero_for_mpe is not None and self.config.rezero_for_mpe: # rezero for mpe
             str_feats, rel_pos_emb, direct_emb = self.str_encoder(masked_str, batch['rel_pos'], batch['direct']) # structure encoder for masked str(line/edge) and relative, direct position
             batch['predicted_video'] = self.generator(masked_img.to(torch.float32), rel_pos_emb, direct_emb, str_feats) # [B, T, 3, H, W] for video from the inpainting model

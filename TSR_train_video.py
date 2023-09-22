@@ -118,7 +118,7 @@ if __name__ == '__main__':
     parser.add_argument('--loss_hole_valid_weight', type=float, nargs='+', default=[0.8, 0.2], help='the weight for computing the hole/valid part ')
     parser.add_argument('--loss_edge_line_weight', type=float, nargs='+', default=[1.0, 0.0], help='the weight for computing the edge/line part ')
     # add the choice to decide the loss function with l1 or mse or binary cross entropy with choice
-    parser.add_argument('--loss_choice', type=str, default="l1", help='the choice of loss function: l1, mse, bce')
+    parser.add_argument('--loss_choice', type=str, default="bce", help='the choice of loss function: l1, mse, bce')
     parser.add_argument('--edge_gaussian', type=int, default=0, help='the sigma of gaussian kernel for edge')
 
     # show th loss_coice and edge_gaussian and the loss_hole_valid_weight and loss_edge_line_weight

@@ -3,7 +3,7 @@ from os.path import join
 import os
 from PIL import Image
 
-img_folder = "./datasets/YouTubeVOS/train_all_frames/JPEGImages"
+img_folder = "./datasets/DAVIS_small/test_set_1/line_25percent/JPEGImages"
 
 width, height = 512, 512
 
@@ -17,6 +17,7 @@ for root, dirs, files in walk(img_folder):
         fullpath = join(root, f)
         if ".jpg" in fullpath or ".png" in fullpath:
             wire_fullpath = fullpath.replace("JPEGImages", "wireframes").replace("jpg", "png")
+            # wire_fullpath = fullpath.replace("Full-Resolution", "Full-Resolution_wireframes").replace("jpg", "png")
             if not os.path.isfile(wire_fullpath):
                 print(f"file: {wire_fullpath} not exist!!")
                 im.save(wire_fullpath)

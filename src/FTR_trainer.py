@@ -620,7 +620,7 @@ class ZITS_video:
 
         self.inpaint_model = DefaultInpaintingTrainingModule_video(args, config, gpu=gpu, rank=rank, test=test, **kwargs).to(gpu) 
         self.input_size = args.input_size
-        self.w, self.h = args.input_size 
+        self.w, self.h = args.input_size   # original is (240,432) there may be some mistake 09/22
         self.neighbor_stride = args.neighbor_stride
         self.sample_length = args.ref_frame_num
         self.pos_num = config.rel_pos_num
@@ -823,18 +823,21 @@ class ZITS_video:
                     if type(items[k]) is torch.Tensor:
                         items[k] = items[k].to(self.device)
                 b, t, _, _, _ = items['edges'].shape
-                edge_pred, line_pred = SampleEdgeLineLogits_video(self.inpaint_model.transformer,
-                                                            context=[items['frames'].to(torch.float16),
-                                                                        items['edges'].to(torch.float16),
-                                                                        items['lines'].to(torch.float16)],
-                                                            masks=items['masks'].clone().to(torch.float16),
-                                                            iterations=5,
-                                                            add_v=0.05, mul_v=4,
-                                                            device=self.device)
-                edge_pred, line_pred = edge_pred.detach().to(torch.float32), line_pred.detach().to(torch.float32)
+                
+                if self.inpaint_model.iteration > int(self.config.MIX_ITERS):  # add 8/19 when checking the edge/line inpainting
+                    edge_pred, line_pred = SampleEdgeLineLogits_video(self.inpaint_model.transformer,
+                                                                context=[items['frames'].to(torch.float16),
+                                                                            items['edges'].to(torch.float16),
+                                                                            items['lines'].to(torch.float16)],
+                                                                masks=items['masks'].clone().to(torch.float16),
+                                                                iterations=5,
+                                                                add_v=0.05, mul_v=4,
+                                                                device=self.device)
+                    edge_pred, line_pred = edge_pred.detach().to(torch.float32), line_pred.detach().to(torch.float32)
 
-                items['edges'] = edge_pred # the inpainted edges
-                items['lines'] = line_pred # # the inpainted lines
+                    items['edges'] = edge_pred # the inpainted edges
+                    items['lines'] = line_pred # # the inpainted lines
+                
                 # eval
                 items = self.inpaint_model(items)
                 outputs_merged = (items['predicted_video'] * items['masks']) + (items['frames'] * (1 - items['masks']))
@@ -986,7 +989,11 @@ class ZITS_video:
             # create a timestamp string for the current date
             timestamp = datetime.datetime.now().strftime("%Y-%m-%d_")
             input_name = self.args.input.split("/")[-1]
-            save_result_dir = os.path.join("./results", self.args.model_name, timestamp+input_name, frame_list[video_no].split("/")[-1]) # save result directory
+            if self.args.output == "":
+                save_result_dir = os.path.join("./results", self.args.model_name, timestamp+input_name, frame_list[video_no].split("/")[-1]) # save result directory
+            else:
+                save_result_dir = os.path.join("./results", self.args.model_name, self.args.output, timestamp+input_name, frame_list[video_no].split("/")[-1])
+
             if not os.path.exists(save_result_dir):
                 os.makedirs(save_result_dir)
             
@@ -1066,10 +1073,13 @@ class ZITS_video:
                     masks=selected_masks.to(torch.float16), iterations=5, add_v=0.05, mul_v=4, device=self.device)   
                     # masks=selected_masks.to(torch.float16), iterations=5, add_v=0, mul_v=0, device=self.device)   
                     edge_pred, line_pred = edge_pred.detach().to(torch.float32), line_pred.detach().to(torch.float32)
-                    # selected_edges = selected_edges.detach()  # old version before 0818
-                    # selected_lines = selected_lines.detach()  # old version before 0818
-                    selected_edges = edge_pred * selected_masks + selected_edges * (1 - selected_masks)  # new version after 0818
-                    selected_lines = line_pred * selected_masks + selected_lines * (1 - selected_masks)  # new version after 0818
+                    
+                    # GT
+                    selected_edges = selected_edges.detach()  # old version before 0818
+                    selected_lines = selected_lines.detach()  # old version before 0818
+                    # inpainted Line Edge
+                    # selected_edges = edge_pred * selected_masks + selected_edges * (1 - selected_masks)  # new version after 0818
+                    # selected_lines = line_pred * selected_masks + selected_lines * (1 - selected_masks)  # new version after 0818
 
                     # test whether the edge_pred and line_pred are correct
                     # print(f"edge_pred: {edge_pred.shape}") # test

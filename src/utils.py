@@ -9,6 +9,7 @@ import torch
 import torchvision.transforms.functional as FF
 from PIL import Image
 from torch.optim.lr_scheduler import LambdaLR
+from torchvision import transforms
 
 import cv2
 
@@ -461,20 +462,19 @@ def get_frame_mask_edge_line_list(args):
         line_dir = os.path.join(data_root, "test_all_frames", "wireframes")
     elif args.input == 'test':
         data_root = "./datasets/YouTubeVOS_small/"
-        mask_dir = os.path.join(data_root, "valid", "mask_random")
-        frame_dir = os.path.join(data_root, "valid", "JPEGImages")
+        mask_dir = os.path.join(data_root, "test", "mask_random")
+        frame_dir = os.path.join(data_root, "test", "JPEGImages")
         if args.edge_gaussian == 0:
-            edge_dir = os.path.join(data_root, "valid", "edges_old")
+            edge_dir = os.path.join(data_root, "test", "edges_old")
         else :
-            edge_dir = os.path.join(data_root, "valid", "edges")
+            edge_dir = os.path.join(data_root, "test", "edges")
         line_dir = os.path.join(data_root, "valid", "wireframes")
-    else:
-        data_root = "./datasets/YouTubeVOS_small/test"
-        mask_dir = os.path.join(data_root, args.input, "mask_random")
+    else: # given the whole path
+        mask_dir = os.path.join(args.input, "mask_random")
         # mask_dir = os.path.join(data_root, args.input, "mask_brush")
-        frame_dir = os.path.join(data_root, args.input, "JPEGImages")
-        edge_dir = os.path.join(data_root, args.input, "edges_old")
-        line_dir = os.path.join(data_root, args.input, "wireframes")
+        frame_dir = os.path.join(args.input, "JPEGImages")
+        edge_dir = os.path.join(args.input, "edges")
+        line_dir = os.path.join(args.input, "wireframes")
 
     # there is a input string "./datasets/YouTubeVOS/valid_all_frames/count_larger_than_50.txt"
     # each line in count_larger_than_50.txt is a video name, read all name and save in a list
@@ -527,6 +527,7 @@ def read_mask(mpath, w, h):
         m = cv2.dilate(m, cv2.getStructuringElement(
             cv2.MORPH_CROSS, (3, 3)), iterations=4)
         masks.append(Image.fromarray(m*255)) # 0, 255
+
     return masks
 
 #  read frames from video 

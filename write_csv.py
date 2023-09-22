@@ -1,11 +1,11 @@
 import csv
 
 # 打开文本文件
-with open('0530.txt', 'r') as f:
+with open('./ckpt/0717_ZITS_video_YoutubeVOS_max500k_mix458k_turn470k_prev_and_fixModelForward749/log_0717_ZITS_video_YoutubeVOS_max500k_mix458k_turn470k_prev_and_fixModelForward749.dat', 'r') as f:
     lines = f.readlines()
 
 # 创建CSV文件
-with open('output.csv', 'w', newline='') as csvfile:
+with open('output_0717.csv', 'w', newline='') as csvfile:
     fieldnames = ['iter', 'PSNR', 'SSIM', 'VFID']
     writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
 

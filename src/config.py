@@ -4,12 +4,14 @@ import yaml
 
 
 class Config(dict):
-    def __init__(self, config_path):
+    def __init__(self, config_path, name):
         with open(config_path, 'r') as f:
             self._yaml = f.read()
             self._dict = yaml.load(self._yaml, Loader=yaml.FullLoader)
             # self._dict['PATH'] = os.path.dirname(config_path)
-            self._dict['PATH'] = os.path.join("./ckpt", self._dict['training_model']['net'])
+            self._dict['PATH'] = os.path.join("./ckpt", name)
+            self._dict['gen_weights_path0'] = os.path.join(self._dict['PATH'], "InpaintingModel_video_gen.pth")
+            self._dict['dis_weights_path0'] = os.path.join(self._dict['PATH'], "InpaintingModel_video_dis.pth")
 
     def __getattr__(self, name):
         if self._dict.get(name) is not None:

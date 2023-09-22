@@ -92,6 +92,34 @@ class LSM_HAWP:
                 wireframe_info = {'lines': lines, 'scores': scores}
                 with open(os.path.join(output_path, img_path.split('/')[-1].split('.')[0] + '.pkl'), 'wb') as w:
                     pickle.dump(wireframe_info, w)
+
+    def wireframe_count(self, img_paths):
+        self.lsm_hawp.eval()
+        count_list = []
+        with torch.no_grad():
+            for img_path in tqdm(img_paths):
+                image = io.imread(img_path).astype(float)
+                if len(image.shape) == 3:
+                    image = image[:, :, :3]
+                else:
+                    image = image[:, :, None]
+                    image = np.tile(image, [1, 1, 3])
+                image = self.transform(image).unsqueeze(0).cuda()
+                output = self.lsm_hawp(image)
+                output = to_device(output, 'cpu')
+                lines = []
+                scores = []
+                if output['num_proposals'] > 0:
+                    lines_tmp = output['lines_pred'].numpy()
+                    scores_tmp = output['lines_score'].tolist()
+                    for line, score in zip(lines_tmp, scores_tmp):
+                        if score > self.threshold:
+                            # y1, x1, y2, x2
+                            lines.append([line[1], line[0], line[3], line[2]])
+                            scores.append(score)
+                wireframe_info = {'lines': lines, 'scores': scores}
+                count_list.append(len(wireframe_info['lines']))
+        return count_list
     
     def wireframe_detect_visualize(self, img_paths, output_wire_pkl_path, output_wire_path, output_edge_path, size):
         def to_int(x):
