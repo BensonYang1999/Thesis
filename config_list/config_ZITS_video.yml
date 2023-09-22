@@ -36,7 +36,8 @@ structure_upsample_path: './ckpt/StructureUpsampling.pth'
 # BATCH_SIZE: 18                 # input batch size for training
 BATCH_SIZE: 2                 # input batch size for training
 # INPUT_SIZE: 512               # input image size for training 0 for original size
-INPUT_SIZE: 256               # input image size for training 0 for original size
+INPUT_SIZE: 256   
+START_ITERS: 800000              # input image size for training 0 for original size
 MIX_ITERS: 91600                # gradually mix the edge and line with prediction from transformer
 Turning_Point: 94000            # only use the predict from transformer for edge and line
 MAX_ITERS: 100000                # maximum number of iterations to train the model
