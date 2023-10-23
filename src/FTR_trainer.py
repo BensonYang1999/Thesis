@@ -620,7 +620,8 @@ class ZITS_video:
 
         self.inpaint_model = DefaultInpaintingTrainingModule_video(args, config, gpu=gpu, rank=rank, test=test, **kwargs).to(gpu) 
         self.input_size = args.input_size
-        self.w, self.h = args.input_size   # original is (240,432) there may be some mistake 09/22
+        # self.w, self.h = args.input_size   # original is (240,432) there may be some mistake 09/22
+        self.h, self.w = args.input_size   # original is (240,432) there may be some mistake 09/22 changed on 10/02
         self.neighbor_stride = args.neighbor_stride
         self.sample_length = args.ref_frame_num
         self.pos_num = config.rel_pos_num
@@ -738,7 +739,8 @@ class ZITS_video:
                     
                     edge_pred, line_pred = SampleEdgeLineLogits_video(self.inpaint_model.transformer,
                     context=[items['frames'][:b, ...].to(torch.float16), items['edges'][:b, ...].to(torch.float16), items['lines'][:b, ...].to(torch.float16)], 
-                    masks=items['masks'][:b, ...].to(torch.float16), iterations=iteration_num_for_pred, add_v=0.05, mul_v=4, device=self.device)   
+                    # masks=items['masks'][:b, ...].to(torch.float16).clone(), iterations=iteration_num_for_pred, add_v=0.05, mul_v=4, device=self.device)   
+                    masks=items['masks'][:b, ...].to(torch.float16).clone(), iterations=1, add_v=0.05, mul_v=4, device=self.device)  # modify 0925
                     edge_pred = edge_pred.detach().to(torch.float32)
                     line_pred = line_pred.detach().to(torch.float32)
                     items['edges'] = edge_pred.detach()
@@ -830,7 +832,8 @@ class ZITS_video:
                                                                             items['edges'].to(torch.float16),
                                                                             items['lines'].to(torch.float16)],
                                                                 masks=items['masks'].clone().to(torch.float16),
-                                                                iterations=5,
+                                                                # iterations=5,
+                                                                iterations=1, # test 0925
                                                                 add_v=0.05, mul_v=4,
                                                                 device=self.device)
                     edge_pred, line_pred = edge_pred.detach().to(torch.float32), line_pred.detach().to(torch.float32)
@@ -857,7 +860,8 @@ class ZITS_video:
                         
                         pred_img = np.array(pred)
                         gt_img = np.array(gt)
-                        ssim += measure_ssim(gt_img, pred_img, data_range=255, multichannel=True, win_size=65)
+                        # ssim += measure_ssim(gt_img, pred_img, data_range=255, multichannel=True, win_size=65)
+                        ssim += measure_ssim(gt_img, pred_img, data_range=255, multichannel=True)
                         s_psnr += measure_psnr(gt_img, pred_img, data_range=255)
                         
                         path = os.path.join(self.val_path, items['name'][img_num])
@@ -911,7 +915,8 @@ class ZITS_video:
                                                                  items['edges'][:b, ...].to(torch.float16),
                                                                  items['lines'][:b, ...].to(torch.float16)],
                                                         masks=items['masks'][:b, ...].clone().to(torch.float16),
-                                                        iterations=5,
+                                                        # iterations=5,
+                                                        iterations=1,
                                                         add_v=0.05, mul_v=4,
                                                         device=self.device)
             edges_pred, lines_pred = edges_pred[:b, ...].detach().to(torch.float32), \
@@ -1070,45 +1075,64 @@ class ZITS_video:
                     # selected_lines = selected_lines*(1-selected_masks) # add 7/17
                     edge_pred, line_pred = SampleEdgeLineLogits_video(self.inpaint_model.transformer,
                     context=[selected_imgs.to(torch.float16), selected_edges.to(torch.float16), selected_lines.to(torch.float16)], 
-                    masks=selected_masks.to(torch.float16), iterations=5, add_v=0.05, mul_v=4, device=self.device)   
-                    # masks=selected_masks.to(torch.float16), iterations=5, add_v=0, mul_v=0, device=self.device)   
+                    # masks=selected_masks.to(torch.float16), iterations=5, add_v=0.05, mul_v=4, device=self.device)   
+                    masks=selected_masks.to(torch.float16).clone(), iterations=1, add_v=0.05, mul_v=4, device=self.device)   # test the setting 0925
                     edge_pred, line_pred = edge_pred.detach().to(torch.float32), line_pred.detach().to(torch.float32)
-                    
-                    # GT
-                    selected_edges = selected_edges.detach()  # old version before 0818
-                    selected_lines = selected_lines.detach()  # old version before 0818
+
+                    # save selected_edge and selected_line and pred_edge, pred_line for checking under the name of video_name
+                    for i in range(5):
+                        # check whether the result folders are exist
+                        if not os.path.exists(f"{save_result_dir}/pred_edges"):
+                            os.makedirs(f"{save_result_dir}/pred_edges")
+
+                        if not os.path.exists(f"{save_result_dir}/pred_lines"):
+                            os.makedirs(f"{save_result_dir}/pred_lines")
+
+                        if not os.path.exists(f"{save_result_dir}/gt_edges"):
+                            os.makedirs(f"{save_result_dir}/gt_edges")
+
+                        if not os.path.exists(f"{save_result_dir}/gt_lines"):
+                            os.makedirs(f"{save_result_dir}/gt_lines")
+
+                        # save the masked edge and line
+                        if not os.path.exists(f"{save_result_dir}/masked_edges"):
+                            os.makedirs(f"{save_result_dir}/masked_edges")
+
+                        if not os.path.exists(f"{save_result_dir}/masked_lines"):
+                            os.makedirs(f"{save_result_dir}/masked_lines")
+
+                        edge = selected_edges[0][i]
+                        pred_edge = edge_pred[0][i]
+                        line = selected_lines[0][i]
+                        pred_line = line_pred[0][i]
+                        mask = selected_masks[0][i]
+                        # torchvision.utils.save_image(edge, f"20230925check/edge_{i}.png")
+                        torchvision.utils.save_image(edge, f"{save_result_dir}/gt_edges/{idx_lst[reference_frames[i]]}")
+                        torchvision.utils.save_image(pred_edge, f"{save_result_dir}/pred_edges/{idx_lst[reference_frames[i]]}")
+                        torchvision.utils.save_image(line, f"{save_result_dir}/gt_lines/{idx_lst[reference_frames[i]]}")
+                        torchvision.utils.save_image(pred_line, f"{save_result_dir}/pred_lines/{idx_lst[reference_frames[i]]}")
+
+                        # compute the masked edge and line where the mask is 1, so we need to invert the mask and then multiply it with edge and line
+                        mask = 1 - mask
+                        mask_edge = edge * mask
+                        mask_line = line * mask
+                        torchvision.utils.save_image(mask_edge, f"{save_result_dir}/masked_edges/{idx_lst[reference_frames[i]]}")
+                        torchvision.utils.save_image(mask_line, f"{save_result_dir}/masked_lines/{idx_lst[reference_frames[i]]}")
+                        # print(f"edge_{i}.png saved")
+                        # print(f"pred_edge_{i}.png saved")
+                        # print(f"line_{i}.png saved")
+                        # print(f"pred_line_{i}.png saved")
+                                        
+                    # 1) GT
+                    # selected_edges = selected_edges.detach()  # old version before 0818
+                    # selected_lines = selected_lines.detach()  # old version before 0818
                     # inpainted Line Edge
+                    # 2)
                     # selected_edges = edge_pred * selected_masks + selected_edges * (1 - selected_masks)  # new version after 0818
                     # selected_lines = line_pred * selected_masks + selected_lines * (1 - selected_masks)  # new version after 0818
-
-                    # test whether the edge_pred and line_pred are correct
-                    # print(f"edge_pred: {edge_pred.shape}") # test
-                    # print(f"line_pred: {line_pred.shape}") # test
-                    # print(f"selected_edges: {selected_edges.shape}") # test
-                    # print(f"selected_lines: {selected_lines.shape}") # test
-                    # # show the max and min value of edge_pred and line_pred
-                    # print(f"edge_pred max: {torch.max(edge_pred)}") # test
-                    # print(f"edge_pred min: {torch.min(edge_pred)}") # test
-                    # print(f"line_pred max: {torch.max(line_pred)}") # test
-                    # print(f"line_pred min: {torch.min(line_pred)}") # test
-                    # print(f"selected_edges max: {torch.max(selected_edges)}") # test
-                    # print(f"selected_edges min: {torch.min(selected_edges)}") # test
-                    # print(f"selected_lines max: {torch.max(selected_lines)}") # test
-                    # print(f"selected_lines min: {torch.min(selected_lines)}") # test
-
-                    # for i in range(5):
-                    #     edge = selected_edges[0][i]
-                    #     pred_edge = edge_pred[0][i]
-                    #     line = selected_lines[0][i]
-                    #     pred_line = line_pred[0][i]
-                    #     torchvision.utils.save_image(edge, f"edge_{i}.png")
-                    #     torchvision.utils.save_image(pred_edge, f"pred_edge_{i}.png")
-                    #     torchvision.utils.save_image(line, f"line_{i}.png")
-                    #     torchvision.utils.save_image(pred_line, f"pred_line_{i}.png")
-                    #     print(f"edge_{i}.png saved")
-                    #     print(f"pred_edge_{i}.png saved")
-                    #     print(f"line_{i}.png saved")
-                    #     print(f"pred_line_{i}.png saved")
+                    # 3)
+                    selected_edges = edge_pred # new version after 0925
+                    selected_lines = line_pred # new version after 0925
 
                     items = dict()
                     items['frames'] = selected_imgs
@@ -1140,15 +1164,6 @@ class ZITS_video:
                     items['rel_pos'] = rel_pos_list.clone().to(torch.long).to(self.device)
                     items['abs_pos'] = abs_pos_list.clone().to(torch.long).to(self.device)
                     items['direct'] = direct_list.clone().to(torch.long).to(self.device)
-
-                    # print(f"items['name']: {items['name']}")
-                    # print(f"items['frames'].shape: {items['frames'].shape}")
-                    # print(f"items['masks'].shape: {items['masks'].shape}")
-                    # print(f"items['edges'].shape: {items['edges'].shape}")
-                    # print(f"items['lines'].shape: {items['lines'].shape}")
-                    # print(f"items['rel_pos'].shape: {items['rel_pos'].shape}")
-                    # print(f"items['abs_pos'].shape: {items['abs_pos'].shape}")
-                    # print(f"items['direct'].shape: {items['direct'].shape}")
 
                     items = self.inpaint_model(items)
                     
@@ -1195,8 +1210,9 @@ class ZITS_video:
             output_i3d_activations.append(get_i3d_activations(imgs).cpu().numpy().flatten())
             real_i3d_activations.append(get_i3d_activations(gts).cpu().numpy().flatten())
             fid_score_tmp = get_fid_score(real_i3d_activations, output_i3d_activations) # test
-            if video_no % 50 ==1:
-                print("video no[{}]: ssim {}, psnr {}, vfid {}".format(video_no, ssim_all/video_length_all, s_psnr_all/video_length_all, fid_score_tmp))
+            # if video_no % 50 ==1:
+            #     print("video no[{}]: ssim {}, psnr {}, vfid {}".format(video_no, ssim_all/video_length_all, s_psnr_all/video_length_all, fid_score_tmp))
+            print("video no[{}]: ssim {}, psnr {}, vfid {}".format(video_no, ssim/video_length, s_psnr/video_length, fid_score_tmp))
 
         ssim_final = ssim_all/(video_length_all*self.sample_length*self.config.BATCH_SIZE)
         psnr_final = s_psnr_all/(video_length_all*self.sample_length*self.config.BATCH_SIZE)

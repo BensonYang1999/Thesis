@@ -11,7 +11,15 @@ datasets/irregular_mask/
 my_testing/
 src/__pycache__/
 src/losses/__pycache__/
+src/models/__pycache__/
 wireframes/
 *.pyc
 src/models/__pycache__
 src/models/__pycache__/TSR_model.cpython-36.pyc
+*.gif
+*.mp4
+datasets/DAVIS_small/
+datasets/YouTubeVOS_small/
+ckpt/*
+results/*
+*.csv

@@ -521,7 +521,7 @@ def read_mask(mpath, w, h):
     mnames.sort()
     for m in mnames: 
         m = Image.open(os.path.join(mpath, m))
-        m = m.resize((h, w), Image.NEAREST)
+        m = m.resize((w, h), Image.NEAREST)
         m = np.array(m.convert('L'))
         m = np.array(m > 0).astype(np.uint8)
         m = cv2.dilate(m, cv2.getStructuringElement(
@@ -544,7 +544,8 @@ def read_frame_from_videos(vname, w, h):
     for fr in fr_lst:
         image = cv2.imread(fr)
         image = Image.fromarray(cv2.cvtColor(image, cv2.COLOR_BGR2RGB))
-        frames.append(image.resize((h,w)))
+        frames.append(image.resize((w,h)))
+
     return frames, idx_lst  
 
 def read_edge_line_PIL(edge_path, line_path, w, h):
@@ -555,8 +556,8 @@ def read_edge_line_PIL(edge_path, line_path, w, h):
 
     edge_list, line_list = [], []
     for ename, lname in zip(edgeNames, lineNames):
-        edge_list.append(Image.open(os.path.join(edge_path, ename)).convert('L').resize((h,w)))
-        line_list.append(Image.open(os.path.join(line_path, lname)).convert('L').resize((h,w)))
+        edge_list.append(Image.open(os.path.join(edge_path, ename)).convert('L').resize((w, h)))
+        line_list.append(Image.open(os.path.join(line_path, lname)).convert('L').resize((w, h)))
 
     return edge_list, line_list
 
