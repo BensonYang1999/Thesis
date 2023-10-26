@@ -373,6 +373,20 @@ def SampleEdgeLineLogits_video(model, context, masks=None, iterations=1, device=
             edges = edges * (1 - masks)
             lines = lines * (1 - masks)
 
+    # save the first edge, line for visualization
+    from torchvision.utils import save_image
+    save_image(edges[0, 0], 'TSR_inference_edge_0.png') # test
+    save_image(lines[0, 0], 'TSR_inference_line_0.png') # test
+    # save second
+    save_image(edges[0, 1], 'TSR_inference_edge_1.png') # test
+    save_image(lines[0, 1], 'TSR_inference_line_1.png') # test
+
+    save_image(edges[0, 2], 'TSR_inference_edge_2.png') # test
+    save_image(lines[0, 2], 'TSR_inference_line_2.png') # test
+
+    save_image(edges[0, 3], 'TSR_inference_edge_3.png') # test
+    save_image(lines[0, 3], 'TSR_inference_line_3.png') # test
+
     return edges, lines
 
 
@@ -521,12 +535,16 @@ def read_mask(mpath, w, h):
     mnames.sort()
     for m in mnames: 
         m = Image.open(os.path.join(mpath, m))
-        m = m.resize((w, h), Image.NEAREST)
+        m = m.resize((w, h), Image.BILINEAR)
         m = np.array(m.convert('L'))
-        m = np.array(m > 0).astype(np.uint8)
+        # m = np.array(m > 0).astype(np.uint8) 
+        m = np.array(m > 125).astype(np.uint8) # revised in 1026
         m = cv2.dilate(m, cv2.getStructuringElement(
             cv2.MORPH_CROSS, (3, 3)), iterations=4)
         masks.append(Image.fromarray(m*255)) # 0, 255
+
+    # save the first mask for visualization
+    masks[0].save('test_inference_mask_smooth.png') # test
 
     return masks
 
@@ -558,6 +576,10 @@ def read_edge_line_PIL(edge_path, line_path, w, h):
     for ename, lname in zip(edgeNames, lineNames):
         edge_list.append(Image.open(os.path.join(edge_path, ename)).convert('L').resize((w, h)))
         line_list.append(Image.open(os.path.join(line_path, lname)).convert('L').resize((w, h)))
+
+    # save the first edge and line for visualization
+    edge_list[0].save('test_inference_edge.png') # test
+    line_list[0].save('test_inference_line.png') # test
 
     return edge_list, line_list
 

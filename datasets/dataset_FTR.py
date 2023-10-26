@@ -720,6 +720,13 @@ class DynamicDataset_video(torch.utils.data.Dataset):
             line = line.resize(size)
             lines.append(line)
 
+            # save the mask, edge, line for visualization
+            # mask.save('test_train_mask_{}.png'.format(idx))
+            # egde.save('test_train_edge_{}.png'.format(idx))
+            # line.save('test_train_line_{}.png'.format(idx))
+            # print(f"save mask, edge, line for {idx}") # test
+
+
         # augment data
         if self.split == 'train':
             prob = random.random()
