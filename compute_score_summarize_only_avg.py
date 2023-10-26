@@ -207,7 +207,7 @@ def compute_avg(input_dir):
     # compute the average score for all videos
     avg_score = np.mean(avg_scores)
     # get round with 3
-    avg_score = round(avg_score, 4)
+    avg_score = round(avg_score, 3)
     return avg_score
         
 
@@ -242,9 +242,9 @@ if __name__ == "__main__":
     df = pd.DataFrame(columns=["condition", "psnr", "ssim", "lpips", "vfid", "vif"])
 
     # line part
-    real_i3d_whole, output_i3d_whole = [], []
     # for type in ["line"]:
     #     for th in [25]:
+    real_i3d_whole, output_i3d_whole = [], []
     for type in ["line", "edge"]:
         for th in [25, 50, 75, 100]:
             if args.date != "":
@@ -258,32 +258,33 @@ if __name__ == "__main__":
                 in_lpips_dir = os.path.join(args.root, f"{type}_{th}percent", f"LPIPS_onlyMask_{args.onlyMask}.csv")
                 in_vif_dir = os.path.join(args.root, f"{type}_{th}percent", f"VIF_onlyMask_{args.onlyMask}.csv")
 
-            if os.path.exists(in_psnr_dir):
-                os.remove(in_psnr_dir)
+            # if os.path.exists(in_psnr_dir):
+            #     os.remove(in_psnr_dir)
 
-            if os.path.exists(in_ssim_dir):
-                os.remove(in_ssim_dir)
+            # if os.path.exists(in_ssim_dir):
+            #     os.remove(in_ssim_dir)
             
-            if os.path.exists(in_lpips_dir):
-                os.remove(in_lpips_dir)
+            # if os.path.exists(in_lpips_dir):
+            #     os.remove(in_lpips_dir)
 
-            if os.path.exists(in_vif_dir):
-                os.remove(in_vif_dir)
+            # if os.path.exists(in_vif_dir):
+            #     os.remove(in_vif_dir)
 
-            # process all videos
-            if args.date != "":
-                imgs_i3d_feature_all, gts_i3d_feature_all = process_videos(os.path.join(args.root, f"{args.date}_{type}_{th}percent"), evalOnlyMask=args.onlyMask, split=args.split)
-            else:
-                imgs_i3d_feature_all, gts_i3d_feature_all = process_videos(os.path.join(args.root, f"{type}_{th}percent"), evalOnlyMask=args.onlyMask, split=args.split)
+            # # process all videos
+            # if args.date != "":
+            #     imgs_i3d_feature_all, gts_i3d_feature_all = process_videos(os.path.join(args.root, f"{args.date}_{type}_{th}percent"), evalOnlyMask=args.onlyMask, split=args.split)
+            # else:
+            #     imgs_i3d_feature_all, gts_i3d_feature_all = process_videos(os.path.join(args.root, f"{type}_{th}percent"), evalOnlyMask=args.onlyMask, split=args.split)
 
-            real_i3d_whole += gts_i3d_feature_all
-            output_i3d_whole += imgs_i3d_feature_all
+            # real_i3d_whole += gts_i3d_feature_all
+            # output_i3d_whole += imgs_i3d_feature_all
 
             psnr_avg = compute_avg(in_psnr_dir)
             ssim_avg = compute_avg(in_ssim_dir)
             lpips_avg = compute_avg(in_lpips_dir)
             vif_avg = compute_avg(in_vif_dir)
-            vfid = get_vfid_score(gts_i3d_feature_all, imgs_i3d_feature_all)
+            # vfid = get_vfid_score(gts_i3d_feature_all, imgs_i3d_feature_all)
+            vfid = 0
 
             # check is "edge" or "line" is in the input_dir
             df = df.append({"condition": f"{type}_{th}", "psnr": psnr_avg, "ssim": ssim_avg, "lpips": lpips_avg, "vfid": vfid, "vif": vif_avg}, ignore_index=True)
@@ -296,9 +297,9 @@ if __name__ == "__main__":
 
     
     if args.date != "":
-        df.to_csv(os.path.join(args.root, f"metrics_summary_{args.date}_onlyMask_{args.onlyMask}.csv"), index=False)
+        df.to_csv(os.path.join(args.root, f"metrics_summary_tmp_{args.date}_onlyMask_{args.onlyMask}.csv"), index=False)
     else:
-        df.to_csv(os.path.join(args.root, f"metrics_summary_onlyMask_{args.onlyMask}.csv"), index=False)
+        df.to_csv(os.path.join(args.root, f"metrics_summary_tmp_onlyMask_{args.onlyMask}.csv"), index=False)
         
     # print the results
     # print(df)

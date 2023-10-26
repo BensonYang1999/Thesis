@@ -24,6 +24,10 @@ parser.add_argument('--onlyMask', action='store_true', default=False)
 parser.add_argument('--split', type=str, default="test")
 parser.add_argument('--cuda', action='store_true', default=False)
 parser.add_argument('--use_DAVIS', action='store_true', default=False)
+# whether gray scale is used
+parser.add_argument('--gray', action='store_true', default=False)
+# whether gaussian filter is used
+parser.add_argument('--gaussian', action='store_true', default=False)
 args = parser.parse_args()
 
 lpips_loss_fn = lpips.LPIPS(net='vgg')
@@ -44,10 +48,20 @@ def read_frame_from_videos(vname , prefix:str):
     lst.sort()
     fr_lst = [vname+'/'+name for name in lst if name.startswith(prefix) and name.endswith(".jpg")]
     frames = []
-    # print(f"fr_lst: {fr_lst}") # test
     for fr in fr_lst:
         image = cv2.imread(fr)
-        image = Image.fromarray(cv2.cvtColor(image, cv2.COLOR_BGR2RGB))
+        if args.gray:
+            image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+            image = np.repeat(image[:, :, np.newaxis], 3, axis=-1)
+        else:
+            image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+
+        if args.gaussian:
+            image = cv2.GaussianBlur(image, (3, 3), 0)
+            image = Image.fromarray(image)
+        else:
+            image = Image.fromarray(image)
+
         # resize image to 432*240
         image = image.resize((432, 240))
         frames.append(image)
@@ -129,11 +143,9 @@ def compute_metrics(pred_dir, evalOnlyMask=False, split="test"):
             gt_img = gt_img * np.stack([mask_img, mask_img, mask_img], axis=-1)
 
         psnr_score = measure_psnr(gt_img, pred_img, data_range=255)
-        # if use_PNG:
-        #     ssim_score = measure_ssim(gt_img, pred_img, data_range=255, multichannel=True)
-        # else:
-        #     ssim_score = measure_ssim(gt_img, pred_img, data_range=255, channel_axis=-1)
-        ssim_score = measure_ssim(gt_img, pred_img, data_range=255, multichannel=True, win_size=65)
+
+        ssim_score = measure_ssim(gt_img, pred_img, data_range=255, multichannel=True)
+
         lpips_score = compute_lpips(gt_img, pred_img)
         vif_score = vifp(gt_img, pred_img)
         psnr_scores.append(psnr_score)
@@ -171,10 +183,10 @@ def process_videos(input_dir, evalOnlyMask=False, split="test"):
         # save the results
         # get the video id
         video_id = subfolder.split("/")[-1]
-        psnr_csv_path = os.path.join(input_dir, f"PSNR_onlyMask_{evalOnlyMask}.csv")
-        ssim_csv_path = os.path.join(input_dir, f"SSIM_onlyMask_{evalOnlyMask}.csv")
-        lpips_csv_path = os.path.join(input_dir, f"LPIPS_onlyMask_{evalOnlyMask}.csv")
-        vif_csv_path = os.path.join(input_dir, f"VIF_onlyMask_{evalOnlyMask}.csv")
+        psnr_csv_path = os.path.join(input_dir, f"PSNR_GRAY_{args.gray}_Gau_{args.gaussian}_onlyMask_{evalOnlyMask}.csv")
+        ssim_csv_path = os.path.join(input_dir, f"SSIM_GRAY_{args.gray}_Gau_{args.gaussian}_onlyMask_{evalOnlyMask}.csv")
+        lpips_csv_path = os.path.join(input_dir, f"LPIPS_GRAY_{args.gray}_Gau_{args.gaussian}_onlyMask_{evalOnlyMask}.csv")
+        vif_csv_path = os.path.join(input_dir, f"VIF_GRAY_{args.gray}_Gau_{args.gaussian}_onlyMask_{evalOnlyMask}.csv")
 
         # save PSNR scores
         write_scores(video_id, psnr_csv_path, psnr_scores)
@@ -242,21 +254,21 @@ if __name__ == "__main__":
     df = pd.DataFrame(columns=["condition", "psnr", "ssim", "lpips", "vfid", "vif"])
 
     # line part
-    real_i3d_whole, output_i3d_whole = [], []
     # for type in ["line"]:
     #     for th in [25]:
+    real_i3d_whole, output_i3d_whole = [], []
     for type in ["line", "edge"]:
         for th in [25, 50, 75, 100]:
             if args.date != "":
-                in_psnr_dir = os.path.join(args.root, f"{args.date}_{type}_{th}percent", f"PSNR_onlyMask_{args.onlyMask}.csv")
-                in_ssim_dir = os.path.join(args.root, f"{args.date}_{type}_{th}percent", f"SSIM_onlyMask_{args.onlyMask}.csv")
-                in_lpips_dir = os.path.join(args.root, f"{args.date}_{type}_{th}percent", f"LPIPS_onlyMask_{args.onlyMask}.csv")
-                in_vif_dir = os.path.join(args.root, f"{args.date}_{type}_{th}percent", f"VIF_onlyMask_{args.onlyMask}.csv")
+                in_psnr_dir = os.path.join(args.root, f"{args.date}_{type}_{th}percent", f"PSNR_GRAY_{args.gray}_Gau_{args.gaussian}_onlyMask_{args.onlyMask}.csv")
+                in_ssim_dir = os.path.join(args.root, f"{args.date}_{type}_{th}percent", f"SSIM_GRAY_{args.gray}_Gau_{args.gaussian}_onlyMask_{args.onlyMask}.csv")
+                in_lpips_dir = os.path.join(args.root, f"{args.date}_{type}_{th}percent", f"LPIPS_GRAY_{args.gray}_Gau_{args.gaussian}_onlyMask_{args.onlyMask}.csv")
+                in_vif_dir = os.path.join(args.root, f"{args.date}_{type}_{th}percent", f"VIF_GRAY_{args.gray}_Gau_{args.gaussian}_onlyMask_{args.onlyMask}.csv")
             else:
-                in_psnr_dir = os.path.join(args.root, f"{type}_{th}percent", f"PSNR_onlyMask_{args.onlyMask}.csv")
-                in_ssim_dir = os.path.join(args.root, f"{type}_{th}percent", f"SSIM_onlyMask_{args.onlyMask}.csv")
-                in_lpips_dir = os.path.join(args.root, f"{type}_{th}percent", f"LPIPS_onlyMask_{args.onlyMask}.csv")
-                in_vif_dir = os.path.join(args.root, f"{type}_{th}percent", f"VIF_onlyMask_{args.onlyMask}.csv")
+                in_psnr_dir = os.path.join(args.root, f"{type}_{th}percent", f"PSNR_GRAY_{args.gray}_Gau_{args.gaussian}_onlyMask_{args.onlyMask}.csv")
+                in_ssim_dir = os.path.join(args.root, f"{type}_{th}percent", f"SSIM_GRAY_{args.gray}_Gau_{args.gaussian}_nlyMask_{args.onlyMask}.csv")
+                in_lpips_dir = os.path.join(args.root, f"{type}_{th}percent", f"LPIPS_GRAY_{args.gray}_Gau_{args.gaussian}_onlyMask_{args.onlyMask}.csv")
+                in_vif_dir = os.path.join(args.root, f"{type}_{th}percent", f"VIF_GRAY_{args.gray}_Gau_{args.gaussian}_onlyMask_{args.onlyMask}.csv")
 
             if os.path.exists(in_psnr_dir):
                 os.remove(in_psnr_dir)
@@ -288,17 +300,19 @@ if __name__ == "__main__":
             # check is "edge" or "line" is in the input_dir
             df = df.append({"condition": f"{type}_{th}", "psnr": psnr_avg, "ssim": ssim_avg, "lpips": lpips_avg, "vfid": vfid, "vif": vif_avg}, ignore_index=True)
 
+
+
     # save the results with the header
     final_vfid = get_vfid_score(real_i3d_whole, output_i3d_whole)
     # df = df.append({"condition": "Average", "psnr": round(df["psnr"].mean(), 2), "ssim": round(df["ssim"].mean(), 3), "lpips": round(df["lpips"].mean(), 3), "vfid": round(final_vfid, 3), "vif": round(df["vif"].mean(), 3)}, ignore_index=True)
     # use concate to add the average row, with value round to 3
-    df = pd.concat([df, pd.DataFrame([["Average", round(df["psnr"].mean(), 2), round(df["ssim"].mean(), 3), round(df["lpips"].mean(), 3), round(final_vfid, 3), round(df["vif"].mean(), 3)]], columns=["condition", "psnr", "ssim", "lpips", "vfid", "vif"])], ignore_index=True)
+    df = pd.concat([df, pd.DataFrame([["Average", round(df["psnr"].mean(), 2), round(df["ssim"].mean(), 3), round(df["lpips"].mean(), 4), round(final_vfid, 3), round(df["vif"].mean(), 3)]], columns=["condition", "psnr", "ssim", "lpips", "vfid", "vif"])], ignore_index=True)
 
     
     if args.date != "":
-        df.to_csv(os.path.join(args.root, f"metrics_summary_{args.date}_onlyMask_{args.onlyMask}.csv"), index=False)
+        df.to_csv(os.path.join(args.root, f"metrics_summary_GRAY_{args.gray}_Gau_{args.gaussian}_{args.date}_onlyMask_{args.onlyMask}.csv"), index=False)
     else:
-        df.to_csv(os.path.join(args.root, f"metrics_summary_onlyMask_{args.onlyMask}.csv"), index=False)
+        df.to_csv(os.path.join(args.root, f"metrics_summary_GRAY_{args.gray}_Gau_{args.gaussian}_onlyMask_{args.onlyMask}.csv"), index=False)
         
     # print the results
     # print(df)
