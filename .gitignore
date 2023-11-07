@@ -23,3 +23,4 @@ datasets/YouTubeVOS_small/
 ckpt/*
 results/*
 *.csv
+segment_model/
