@@ -53,7 +53,8 @@ def main_worker(gpu, args):
         config.print()
         print('\nstart eval...\n')
     # model.eval()
-    model.eval_whole_video()
+    print(f'start eval whole video... with GT line edge <{args.useGT_LE}>')
+    model.eval_whole_video(args.useGT_LE)
 
 
 if __name__ == "__main__":
@@ -83,6 +84,8 @@ if __name__ == "__main__":
     parser.add_argument("--neighbor_stride", type=int, default=5)
     parser.add_argument('--input', type=str, default="youtubevos")
     parser.add_argument('--output', type=str, default="")
+    # use GT line edge
+    parser.add_argument('--useGT_LE', action='store_true', help='use GT line edge')
 
     args = parser.parse_args()
 
