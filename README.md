@@ -1,4 +1,4 @@
-# Incremental Transformer Structure Enhanced Image Inpainting with Masking Positional Encoding
+# SERVI: Structure Enhanced Regional Video Inpainting
 by [Qiaole Dong*](https://github.com/DQiaole),
 [Chenjie Cao*](https://github.com/ewrfcas),
 [Yanwei Fu](http://yanweifu.github.io/)
