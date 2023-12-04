@@ -1,5 +1,5 @@
 # SERVI: Structure Enhanced Regional Video Inpainting
-by [Qiaole Dong*](https://github.com/DQiaole),
+by [MuXi Chen](https://github.com/ChenMuHsi),
 [Chenjie Cao*](https://github.com/ewrfcas),
 [Yanwei Fu](http://yanweifu.github.io/)
 
