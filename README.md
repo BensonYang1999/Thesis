@@ -1,5 +1,18 @@
 # SERVI: Structure Enhanced Regional Video Inpainting
-by [MuXi Chen](https://github.com/ChenMuHsi),
+by [MuXi Chen](https://github.com/ChenMuHsi), YuChee Tseng, YenAnn Chen
+
+> [!IMPORTANT]  
+> This work is referencing to [ZITS](https://github.com/DQiaole/ZITS_inpainting) and [FuseFormer](https://github.com/ruiliu-ai/FuseFormer)
+
+## Dataset
+### 1. YoutubeVOS
+[Official Website](https://youtube-vos.org)
+
+### 2. DAVIS
+[Official Website](https://davischallenge.org)
+
+## Pretrain model
+OneDrive Link: [1024_SERVI](https://1drv.ms/f/s!AuoSU7-7YWU1hbAOOs1G8sgpSJTpSQ?e=v6djZ7)
 
 ## Train
 ### TSR model
