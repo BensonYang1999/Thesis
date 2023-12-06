@@ -13,6 +13,7 @@ by [MuXi Chen](https://github.com/ChenMuHsi), YuChee Tseng, YenAnn Chen
 
 ## Pretrain model
 The downloaded files should be organized as a folder under ./ckpt
+
 OneDrive Link: [1024_SERVI](https://1drv.ms/f/s!AuoSU7-7YWU1hbAOOs1G8sgpSJTpSQ?e=v6djZ7)
 
 ## Train
