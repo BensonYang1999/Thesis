@@ -291,27 +291,19 @@ Below is for video version evaluation
 """
 from src.models.i3d import InceptionI3d
 
+from src.utils import read_frame_from_videos
+
 i3d_model = None
 
-def get_pred_gt_frame_list(pred_path, gt_path):
-    pred_folder = sorted(os.listdir(pred_path))
-    pred_list = [os.path.join(pred_path, name) for name in pred_folder]
-    gt_folder = sorted(os.listdir(gt_path))
-    gt_list = [os.path.join(gt_path, name) for name in gt_folder]
+# def get_pred_gt_frame_list(pred_path, gt_path):
+#     pred_folder = sorted(os.listdir(pred_path))
+#     pred_list = [os.path.join(pred_path, name) for name in pred_folder]
+#     gt_folder = sorted(os.listdir(gt_path))
+#     gt_list = [os.path.join(gt_path, name) for name in gt_folder]
 
-    print(f"[Finish building creating gt video <{gt_path}> and pred video <{pred_path}> list.]")
-    return pred_list, gt_list
+#     print(f"[Finish building creating gt video <{gt_path}> and pred video <{pred_path}> list.]")
+#     return pred_list, gt_list
 
-def read_frame_from_videos(vname):
-    lst = os.listdir(vname)
-    lst.sort()
-    fr_lst = [vname+'/'+name for name in lst]
-    frames = []
-    for fr in fr_lst:
-        image = cv2.imread(fr)
-        image = Image.fromarray(cv2.cvtColor(image, cv2.COLOR_BGR2RGB))
-        frames.append(image)
-    return frames  
 
 _to_tensors = transforms.Compose([
     Stack(),
@@ -422,6 +414,33 @@ def get_inpainting_metrics_video(pred, gt, logger, device):
                 '\nPSNR:{0:.3f}, SSIM:{1:.3f}, vfid:{4:.3f}\n'.format(s_psnr_final, ssim_final, fid_score))
 
     return {'psnr': s_psnr_final, 'ssim': ssim_final, 'vfid': fid_score}
+
+### === Below are for the video inpainting
+def compute_vfid(gt, pred):
+    #  conver gt, pred to torch tensor
+    gt = torch.from_numpy(gt).permute(2, 0, 1).unsqueeze(0).to(torch.uint8)
+    pred = torch.from_numpy(pred).permute(2, 0, 1).unsqueeze(0).to(torch.uint8)
+    # put the images to GPU
+    if args.cuda:
+        gt = gt.cuda()
+        pred = pred.cuda()
+
+    vfid_fn.update(gt, real=True)
+    vfid_fn.update(pred, real=False)
+    vfid_score = vfid_fn.compute().item()
+    return vfid_score
+
+def compute_lpips(gt, pred):
+    # conver gt, pred to torch tensor
+    gt = torch.from_numpy(gt).permute(2, 0, 1).unsqueeze(0).to(torch.uint8)
+    pred = torch.from_numpy(pred).permute(2, 0, 1).unsqueeze(0).to(torch.uint8)
+    # put the images to GPU
+    if args.cuda:
+        gt = gt.cuda()
+        pred = pred.cuda()
+
+    lpips_score = lpips_loss_fn.forward(gt, pred).item()
+    return lpips_score
 
 if __name__ == "__main__":
     tgt = 'GT' # ground truth

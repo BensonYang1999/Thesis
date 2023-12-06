@@ -460,11 +460,11 @@ Below are the tool function reference from FuseFormer
 def get_frame_mask_edge_line_list(args):
 
     if args.input == 'davis':
-        data_root = "./datasets/DATASET_DAVIS"
-        mask_dir = "./datasets/random_mask_stationary_w432_h240"
-        frame_dir = os.path.join(data_root, "JPEGImages", "480p")
-        edge_dir = os.path.join(data_root, "edges")
-        line_dir = os.path.join(data_root, "wireframes")
+        data_root = "./datasets/DAVIS"
+        mask_dir = "./datasets/DAVIS/JPEGImages/mask_random/"
+        frame_dir = os.path.join(data_root, "JPEGImages", "Full-Resolution")
+        edge_dir = os.path.join(data_root, "JPEGImages", "Full-Resolution_edges")
+        line_dir = os.path.join(data_root, "JPEGImages", "Full-Resolution_wireframes")
     elif args.input == 'youtubevos':
         data_root = "./datasets/YouTubeVOS/"
         mask_dir = "./datasets/YouTubeVOS/test_all_frames/mask_random"
@@ -529,7 +529,7 @@ def get_ref_index(f, neighbor_ids, length, ref_length=5, num_ref=-1):
     return ref_index
 
 # read frame-wise masks 
-def read_mask(mpath, w, h):
+def read_mask(mpath, w=432, h=240):
     masks = []
     mnames = os.listdir(mpath)
     mnames.sort()
@@ -537,19 +537,18 @@ def read_mask(mpath, w, h):
         m = Image.open(os.path.join(mpath, m))
         m = m.resize((w, h), Image.BILINEAR)
         m = np.array(m.convert('L'))
-        # m = np.array(m > 0).astype(np.uint8) 
         m = np.array(m > 125).astype(np.uint8) # revised in 1026
         m = cv2.dilate(m, cv2.getStructuringElement(
             cv2.MORPH_CROSS, (3, 3)), iterations=4)
         masks.append(Image.fromarray(m*255)) # 0, 255
 
     # save the first mask for visualization
-    masks[0].save('test_inference_mask_smooth.png') # test
+    # masks[0].save('test_inference_mask_smooth.png') # test
 
     return masks
 
 #  read frames from video 
-def read_frame_from_videos(vname, w, h):
+def read_frame_from_videos(vname, w=432, h=240):
 
     lst = os.listdir(vname)
     lst.sort()

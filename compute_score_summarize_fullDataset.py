@@ -12,70 +12,11 @@ import itertools
 import argparse
 import lpips
 
+from src.utils import read_frame_from_videos, read_mask, compute_vfid, compute_lpips
+
 # from sewar.full_ref import uqi, mse, rmse, scc, rase, sam, msssim, vifp, psnrb
 from sewar.full_ref import uqi, mse, vifp
 
-def read_frame_from_videos(vname , prefix:str):
-    lst = os.listdir(vname)
-    lst.sort()
-    fr_lst = [vname+'/'+name for name in lst if name.startswith(prefix)]
-    frames = []
-    for fr in fr_lst:
-        image = cv2.imread(fr)
-        image = Image.fromarray(cv2.cvtColor(image, cv2.COLOR_BGR2RGB))
-        # resize image to 432*240
-        image = image.resize((432, 240))
-        frames.append(image)
-    return frames  
-
-# define a function call read_mask_from_video which is similar to read_frame_from_videos but read the image with gray scale and resize to 432*240 and convert to boolean
-def read_mask_from_video(vname , prefix:str):
-    lst = os.listdir(vname)
-    lst.sort()
-    mk_lst = [vname+'/'+name for name in lst if name.startswith(prefix)]
-    masks = []
-    for mk in mk_lst:
-        image = cv2.imread(mk, cv2.IMREAD_GRAYSCALE)
-        image = Image.fromarray(image)
-        # resize image to 432*240
-        image = image.resize((432, 240))
-        # convert to boolean
-        image = np.array(image) > 0
-        masks.append(image)
-    return masks
-
-def compute_vfid(gt, pred):
-    # conver list to numpy array
-    gt = np.array(gt)
-    pred = np.array(pred)
-
-    # convert the images to torch tensors
-    print(gt.shape)
-    gt = torch.from_numpy(gt).permute(0, 3, 1, 2).unsqueeze(0).float()
-    pred = torch.from_numpy(pred).permute(0, 3, 1, 2).unsqueeze(0).float()
-
-    # put the images to GPU
-    gt = gt.cuda()
-    pred = pred.cuda()
-
-    real_i3d_activation = get_i3d_activations(gt).cpu().numpy().flatten()
-    output_i3d_activation = get_i3d_activations(pred).cpu().numpy().flatten()
-
-    print("real i3d", real_i3d_activation.shape)
-    print("output i3d", output_i3d_activation.shape)
-
-    return fid_score
-
-def compute_lpips(gt, pred):
-    # conver gt, pred to torch tensor
-    gt = torch.from_numpy(gt).permute(2, 0, 1).unsqueeze(0).to(torch.uint8)
-    pred = torch.from_numpy(pred).permute(2, 0, 1).unsqueeze(0).to(torch.uint8)
-    # put the images to GPU
-    gt = gt.cuda()
-    pred = pred.cuda()
-
-    lpips_score = lpips_loss_fn.forward(gt, pred).item()
-    return lpips_score
 
 def compute_fid(gt, pred):
     #  conver gt, pred to torch tensor
@@ -96,11 +37,11 @@ def compute_metrics(pred_dir, evalOnlyMask=False, split="valid"):
     gt_dir = os.path.join(f"./datasets/YouTubeVOS/{split}_all_frames/JPEGImages", vname)
     mask_dir = os.path.join(f"./datasets/YouTubeVOS/{split}_all_frames/mask_random", vname)
     # read all the images with no prefix
-    gt_images = read_frame_from_videos(gt_dir, "")
+    gt_images = read_frame_from_videos(gt_dir)
     # read all the images with no prefix
-    pred_images = read_frame_from_videos(pred_dir, "")
+    pred_images = read_frame_from_videos(pred_dir)
     # read all the masks with no prefix
-    mask_images = read_mask_from_video(mask_dir, "")
+    mask_images = read_mask(mask_dir)
 
     # compute the PSNR for each pair of images
     psnr_scores, ssim_scores, lpips_scores = [], [], []
