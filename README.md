@@ -14,7 +14,7 @@ by [MuXi Chen](https://github.com/ChenMuHsi), YuChee Tseng, YenAnn Chen
 ## Pretrain model
 The downloaded files should be organized as a folder under ./ckpt
 
-OneDrive Link: [FTR_model (1024_SERVI)](https://1drv.ms/f/s!AuoSU7-7YWU1hbAOOs1G8sgpSJTpSQ?e=v6djZ7),  [TSR_model (0521_YoutubeVOS)](https://1drv.ms/f/s!AuoSU7-7YWU1hbAOXlOG_aazV37wRg?e=WNiHtc)
+OneDrive Link: [FTR_model (1024_SERVI)](https://1drv.ms/f/s!AuoSU7-7YWU1hbAOOs1G8sgpSJTpSQ?e=v6djZ7),  [TSR_model (0521_YoutubeVOS)](https://1drv.ms/f/s!AuoSU7-7YWU1hbAVZVR4FcLBkk7sBA?e=0qjpkv)
 
 ## Train
 ### TSR model
