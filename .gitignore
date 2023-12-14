@@ -1,5 +1,6 @@
-*.png
-*.jpg
+# *.png
+# *.jpg
+*.cpython-36.pyc
 *.zip
 datasets/DAVIS/
 datasets/Indoor/
