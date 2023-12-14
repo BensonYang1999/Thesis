@@ -4,7 +4,7 @@ by [MuXi Chen](https://github.com/ChenMuHsi), YuChee Tseng, YenAnn Chen
 > [!IMPORTANT]  
 > This work is referencing to [ZITS](https://github.com/DQiaole/ZITS_inpainting) and [FuseFormer](https://github.com/ruiliu-ai/FuseFormer)
 
-![system architecture](./imgs/sys_arch.png)
+![system architecture](./imgs/sys_arch.jpg)
 
 ### TODO:
 - [ ] Overall Workflow figure
