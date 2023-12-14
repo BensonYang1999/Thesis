@@ -1,4 +1,4 @@
-# SERVI: Structure Enhanced Regional Video Inpainting
+# SERVI: Structure Enhanced Regional Video Inpainting (Paper)
 by [MuXi Chen](https://github.com/ChenMuHsi), YuChee Tseng, YenAnn Chen
 
 > [!IMPORTANT]  
