@@ -12,6 +12,7 @@ my_testing/
 src/__pycache__/
 src/losses/__pycache__/
 src/models/__pycache__/
+src/Fuseformer/__pycache__/
 wireframes/
 *.pyc
 src/models/__pycache__
