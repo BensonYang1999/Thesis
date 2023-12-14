@@ -26,3 +26,4 @@ ckpt/*
 results/*
 *.csv
 segment_model/
+__pycache__/
