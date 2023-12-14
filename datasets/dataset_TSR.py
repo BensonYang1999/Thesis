@@ -279,10 +279,7 @@ class ContinuousEdgeLineDatasetMask_video(Dataset):  # mostly refer to FuseForme
 
         if name == 'YouTubeVOS':
             vid_lst_prefix = os.path.join(root, name, split+'_all_frames/JPEGImages')
-            if self.opts.edge_gaussian == 0:
-                edge_lst_prefix = os.path.join(root, name, split+'_all_frames/edges_old')
-            else:
-                edge_lst_prefix = os.path.join(root, name, split+'_all_frames/edges')
+            edge_lst_prefix = os.path.join(root, name, split+'_all_frames/edges')
             line_lst_prefix = os.path.join(root, name, split+'_all_frames/wireframes')
             vid_lst = os.listdir(vid_lst_prefix)
             edge_lst = os.listdir(edge_lst_prefix)
@@ -321,8 +318,8 @@ class ContinuousEdgeLineDatasetMask_video(Dataset):  # mostly refer to FuseForme
     def __getitem__(self, index):
         try:
             item = self.load_item(index)
-        except:
-            print('Loading error in video {}'.format(self.video_names[index]))
+        except Exception as e:
+            print('Loading error in video {}, index : {}'.format(self.video_names[index], index, e))
             item = self.load_item(0)
         return item
 
@@ -345,6 +342,7 @@ class ContinuousEdgeLineDatasetMask_video(Dataset):  # mostly refer to FuseForme
         edges = []
         lines = []
         masks = []
+
         for idx in ref_index:
             img = Image.open(all_frames[idx]).convert('RGB')
             img = img.resize(self.size)
