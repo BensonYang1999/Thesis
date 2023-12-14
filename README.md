@@ -4,6 +4,14 @@ by [MuXi Chen](https://github.com/ChenMuHsi), YuChee Tseng, YenAnn Chen
 > [!IMPORTANT]  
 > This work is referencing to [ZITS](https://github.com/DQiaole/ZITS_inpainting) and [FuseFormer](https://github.com/ruiliu-ai/FuseFormer)
 
+### TODO:
+- [ ] Overall Workflow figure
+- [ ] Data preparing workflow figure
+- [ ] TSR training code re-organized
+- [ ] FTR training code re-organized 
+- [ ] Future work list
+
+
 ## Dataset
 ### 1. YoutubeVOS
 [Official Website](https://youtube-vos.org)
