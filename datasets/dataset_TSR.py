@@ -359,13 +359,12 @@ class ContinuousEdgeLineDatasetMask_video(Dataset):  # mostly refer to FuseForme
             if self.split == 'train':
                 masks.append(all_masks[idx])
             else:
-                mask = Image.open(all_masks[idx]).convert('L')
-                # make sure the value of mask is either 0 or 255
-                mask = np.array(mask)
-                mask[mask > 0] = 255
-                mask = Image.fromarray(mask)
-                mask = mask.resize(self.size)
-                masks.append(mask)
+                mask = Image.open(all_masks[idx])
+                mask = mask.resize(self.size, Image.BILINEAR)
+                mask = np.array(mask.convert('L'))
+                mask = np.array(mask > 127).astype(np.uint8)
+                mask = cv2.dilate(mask, cv2.getStructuringElement(cv2.MORPH_CROSS, (3, 3)), iterations=4)
+                masks.append(Image.fromarray(mask*255))
             # masks.append(all_masks[idx])
 
         if self.split == 'train':
