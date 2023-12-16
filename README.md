@@ -10,7 +10,8 @@ by [MuXi Chen](https://github.com/ChenMuHsi), YuChee Tseng, YenAnn Chen
 - [ ] Overall Workflow figure
 - [ ] Data preparing workflow figure
 - [ ] TSR training code re-organized
-- [ ] FTR training code re-organized 
+- [ ] FTR training code re-organized
+- [ ] Wvaluation process 
 - [ ] Future work list
 
 
