@@ -323,6 +323,9 @@ def SampleEdgeLineLogits_video(model, context, masks=None, iterations=1, device=
     edges = edges.to(device)
     lines = lines.to(device)
     masks = masks.to(device)
+    frames = frames * (1 - masks)
+    edges = edges * (1 - masks)
+    lines = lines * (1 - masks)
 
     # Now we assume that the first dimension of img, edge, line, and mask is the batch size
     # and the second dimension is the time dimension.
