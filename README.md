@@ -11,6 +11,7 @@ by [MuXi Chen](https://github.com/ChenMuHsi), YuChee Tseng, YenAnn Chen
 - [ ] Data preparing workflow figure
 - [ ] TSR training code re-organized
 - [ ] FTR training code re-organized
+- [ ] Bug of VFID score shown during training process
 - [ ] Wvaluation process 
 - [ ] Future work list
 
