@@ -14,6 +14,7 @@ by [MuXi Chen](https://github.com/ChenMuHsi), YuChee Tseng, YenAnn Chen
 - [ ] Bug of VFID score shown during training process
 - [ ] Wvaluation process 
 - [ ] Future work list
+- [ ] Fix bug of compute summary
 
 
 ## Dataset
