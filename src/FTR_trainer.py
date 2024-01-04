@@ -861,7 +861,7 @@ class ZITS_video:
                         pred_img = np.array(pred)
                         gt_img = np.array(gt)
                         # ssim += measure_ssim(gt_img, pred_img, data_range=255, multichannel=True, win_size=65)
-                        ssim += measure_ssim(gt_img, pred_img, data_range=255, multichannel=True)
+                        ssim += measure_ssim(gt_img, pred_img, data_range=255, channel_axis=2)
                         s_psnr += measure_psnr(gt_img, pred_img, data_range=255)
                         
                         path = os.path.join(self.val_path, items['name'][img_num])
@@ -976,7 +976,7 @@ class ZITS_video:
         self.inpaint_model.eval()  # set model to eval mode
 
         frame_list, mask_list, edge_list, line_list = get_frame_mask_edge_line_list(self.args) # get frame and mask list
-        assert len(frame_list) == len(mask_list) # check if the number of frames and masks are the same
+        assert len(frame_list) == len(mask_list) == len(edge_list) == len(line_list) # check if the number of frames and masks are the same
         video_num = len(frame_list) # number of videos
 
         ssim_all, psnr_all, len_all = 0., 0., 0. 
@@ -988,8 +988,7 @@ class ZITS_video:
 
         for video_no in tqdm(range(video_num)): # iterate over all videos
             video_name = frame_list[video_no].split("/")[-1]
-            print("[Processing: {}]".format(video_name)) # print video name
-            print(video_no) # print video number
+            print("[Processing video {}: {}]".format(video_no, video_name)) # print video number and name
 
             # create a timestamp string for the current date
             timestamp = datetime.datetime.now().strftime("%Y-%m-%d_")
@@ -1078,12 +1077,12 @@ class ZITS_video:
                         selected_lines = selected_lines.detach()  # old version before 0818
                     else: # use predicted edge and line
                         edge_pred, line_pred = SampleEdgeLineLogits_video(self.inpaint_model.transformer,
-                        context=[selected_imgs.to(torch.float16), selected_edges.to(torch.float16), selected_lines.to(torch.float16)], 
-                        # masks=selected_masks.to(torch.float16), iterations=5, add_v=0.05, mul_v=4, device=self.device)   
-                        masks=selected_masks.to(torch.float16).clone(), iterations=1, add_v=0.05, mul_v=4, device=self.device)   # test the setting 0925
+                            context=[selected_imgs.to(torch.float16), selected_edges.to(torch.float16), selected_lines.to(torch.float16)], 
+                            # masks=selected_masks.to(torch.float16), iterations=5, add_v=0.05, mul_v=4, device=self.device)   
+                            # masks=selected_masks.to(torch.float16).clone(), iterations=1, add_v=0.05, mul_v=4, device=self.device)   # test the setting 0925
+                            masks=selected_masks.to(torch.float16))   # test the setting 0925
                         edge_pred, line_pred = edge_pred.detach().to(torch.float32), line_pred.detach().to(torch.float32)
 
-                        # save selected_edge and selected_line and pred_edge, pred_line for checking under the name of video_name
                         for i in range(5):
                             # check whether the result folders are exist
                             if not os.path.exists(f"{save_result_dir}/pred_edges"):
@@ -1183,19 +1182,20 @@ class ZITS_video:
                         idx = reference_frames[i] # get the index of the neighbor frame
                         img = np.array(outputs_merged[i]).astype( 
                             np.uint8)*binary_masks[idx] + frames[idx] * (1-binary_masks[idx]) # get the inpainted frame
-                        if comp_frames[idx] is None: # if the completed frame is None, initialize it
-                            comp_frames[idx] = img 
-                        else: 
-                            comp_frames[idx] = comp_frames[idx].astype(
-                                np.float32)*0.5 + img.astype(np.float32)*0.5 # inpainted multiple times, and get the average result
-                        # comp_frames[idx] = img # test without average
+                        # if comp_frames[idx] is None: # if the completed frame is None, initialize it
+                        #     comp_frames[idx] = img 
+                        # else: 
+                        #     comp_frames[idx] = comp_frames[idx].astype(
+                        #         np.float32)*0.5 + img.astype(np.float32)*0.5 # inpainted multiple times, and get the average result
+                        comp_frames[idx] = img # test without average
 
             ssim, psnr, s_psnr = 0., 0., 0. 
             comp_PIL = [] 
+            print(f"save in {save_result_dir}")
             for f in range(video_length): # iterate over all frames in this video
                 comp = comp_frames[f] # get the completed frame
                 comp = cv2.cvtColor(np.array(comp).astype(np.uint8), cv2.COLOR_BGR2RGB) # convert the completed frame to RGB
-                print(f"save in {os.path.join(save_result_dir, idx_lst[f])}")
+                # print(f"save in {os.path.join(save_result_dir, idx_lst[f])}")
                 cv2.imwrite(os.path.join(save_result_dir, idx_lst[f]), comp) # save the completed frame
                 new_comp = cv2.imread(os.path.join(save_result_dir, idx_lst[f])) # read the saved completed frame
                 new_comp = Image.fromarray(cv2.cvtColor(new_comp, cv2.COLOR_BGR2RGB)) # convert the completed frame to RGB
@@ -1204,7 +1204,7 @@ class ZITS_video:
 
                 gt = cv2.cvtColor(np.array(frames[f]).astype(np.uint8), cv2.COLOR_BGR2RGB) # convert the ground truth frame to RGB
                 # gt = np.array(frames[f]).astype(np.uint8)
-                ssim += measure_ssim(comp, gt, data_range=255, multichannel=True, win_size=65) # compute SSIM
+                ssim += measure_ssim(comp, gt, data_range=255, multichannel=True, win_size=65, channel_axis=2) # compute SSIM
                 s_psnr += measure_psnr(comp, gt, data_range=255) # compute PSNR
 
             ssim_all += ssim

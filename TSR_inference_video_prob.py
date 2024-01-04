@@ -27,7 +27,7 @@ if __name__ == '__main__':
     parser.add_argument('--loss_choice', type=str, default="bce", help='the choice of loss function: l1, mse, bce')
     parser.add_argument('--edge_gaussian', type=int, default=0, help='the sigma of gaussian kernel for edge')
     parser.add_argument("--model", type=str, default='fuseformer')
-    parser.add_argument("-v", "--video", type=str, required=True)
+    # parser.add_argument("-v", "--video", type=str, required=True)
 
     opts = parser.parse_args()
 
@@ -41,7 +41,7 @@ if __name__ == '__main__':
     IGPT_model.load_state_dict(checkpoint if opts.ckpt_path.endswith('.pt') else checkpoint['model'])
     IGPT_model.to("cuda")
 
-    test_dataset = ContinuousEdgeLineDatasetMask_video(opts, sample=opts.ref_frame_num, size=(432, 240), split='valid', name=opts.dataset_name, root=opts.dataset_root)
+    test_dataset = ContinuousEdgeLineDatasetMask_video(opts, sample=opts.ref_frame_num, size=(432, 240), split='test', name=opts.dataset_name, root=opts.dataset_root)
     
 
     for it in tqdm(range(test_dataset.__len__())):

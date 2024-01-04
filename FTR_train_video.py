@@ -65,7 +65,17 @@ def main_worker(gpu, args):
             print('\nstart training...\n')
         model.train()
     except Exception as e:
-        print('Exception in main_worker:', e)
+        print('\nException in main_worker:', e)
+        e_type, e_object, e_traceback = sys.exc_info()
+        e_filename = os.path.split(
+            e_traceback.tb_frame.f_code.co_filename)[1]
+        e_message = str(e)
+        e_line_number = e_traceback.tb_lineno
+
+        print(f'exception type: {e_type}')
+        print(f'exception filename: {e_filename}')
+        print(f'exception line number: {e_line_number}')
+        print(f'exception message: {e_message}')
     finally:
         cleanup()
 
@@ -83,8 +93,8 @@ if __name__ == "__main__":
     parser.add_argument('--config_file', type=str, default='./config_list/config_ZITS_video.yml',
                         help='The config file of each experiment ')
     parser.add_argument('--nodes', type=int, default=1, help='how many machines')
-    parser.add_argument('--gpus', type=int, default=2, help='how many GPUs in one node')
-    parser.add_argument('--GPU_ids', type=str, default='0,1')
+    parser.add_argument('--gpus', type=int, default=1, help='how many GPUs in one node')
+    parser.add_argument('--GPU_ids', type=str, default='0')
     parser.add_argument('--node_rank', type=int, default=0, help='the id of this machine')
     parser.add_argument('--DDP', action='store_true', help='DDP')
     parser.add_argument('--lama', action='store_true', help='train the lama first')
@@ -118,7 +128,7 @@ if __name__ == "__main__":
     args.config_path = config_path
 
     os.environ['CUDA_VISIBLE_DEVICES'] = args.GPU_ids
-    os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "max_split_size_mb=2048"
+    # os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "max_split_size_mb=2048"
     if args.DDP:
         args.world_size = args.nodes * args.gpus
         os.environ['MASTER_ADDR'] = 'localhost'

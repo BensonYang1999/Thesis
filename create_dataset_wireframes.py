@@ -22,12 +22,20 @@ ckpt_path = "ckpt/best_lsm_hawp.pth"
 # wire_pkl_roots = {'DAVIS': './datasets/DAVIS/JPEGImages/Full-Resolution_wireframes_pkl', 'YouTubeVOS': './datasets/YouTubeVOS/train_all_frames/wireframes_pkl'}
 # wire_roots = {'DAVIS': './datasets/DAVIS/JPEGImages/Full-Resolution_wireframes', 'YouTubeVOS': './datasets/YouTubeVOS/train_all_frames/wireframes'}
 # edge_roots = {'DAVIS': './datasets/DAVIS/JPEGImages/Full-Resolution_edges', 'YouTubeVOS': './datasets/YouTubeVOS/train_all_frames/edges'}
+# dataset_roots = {'YouTubeVOS': './datasets/YouTubeVOS/test_all_frames/JPEGImages'}
+# wire_pkl_roots = {'YouTubeVOS': './datasets/YouTubeVOS/test_all_frames/wireframes_pkl'}
+# wire_roots = {'YouTubeVOS': './datasets/YouTubeVOS/test_all_frames/wireframes'}
+# edge_roots = {'YouTubeVOS': './datasets/YouTubeVOS/test_all_frames/edges'}
+# dataset_roots = {'YouTubeVOS': './datasets/YouTubeVOS/train_all_frames/JPEGImages'}
+# wire_pkl_roots = {'YouTubeVOS': './datasets/YouTubeVOS/train_all_frames/wireframes_pkl'}
+# wire_roots = {'YouTubeVOS': './datasets/YouTubeVOS/train_all_frames/wireframes'}
+# edge_roots = {'YouTubeVOS': './datasets/YouTubeVOS/train_all_frames/edges'}
 dataset_roots = {'YouTubeVOS': './datasets/YouTubeVOS/test_all_frames/JPEGImages'}
 wire_pkl_roots = {'YouTubeVOS': './datasets/YouTubeVOS/test_all_frames/wireframes_pkl'}
 wire_roots = {'YouTubeVOS': './datasets/YouTubeVOS/test_all_frames/wireframes'}
 edge_roots = {'YouTubeVOS': './datasets/YouTubeVOS/test_all_frames/edges'}
 
-os.environ['CUDA_VISIBLE_DEVICES'] = '1'
+os.environ['CUDA_VISIBLE_DEVICES'] = '0'
 
 
 if __name__ == '__main__':

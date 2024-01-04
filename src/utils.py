@@ -323,6 +323,9 @@ def SampleEdgeLineLogits_video(model, context, masks=None, iterations=1, device=
     edges = edges.to(device)
     lines = lines.to(device)
     masks = masks.to(device)
+    frames = frames * (1 - masks)
+    edges = edges * (1 - masks)
+    lines = lines * (1 - masks)
 
     # Now we assume that the first dimension of img, edge, line, and mask is the batch size
     # and the second dimension is the time dimension.
@@ -334,7 +337,10 @@ def SampleEdgeLineLogits_video(model, context, masks=None, iterations=1, device=
         for i in range(iterations):
             edges_logits, lines_logits = model.forward_with_logits(frames, edges, lines, masks=masks)
             
+            # print(edges_logits.shape)
             edges_logits = edges_logits.view(batch_size*timesteps, *edges_logits.shape[2:])
+            # print(edges_logits.shape)
+            # input()
             lines_logits = lines_logits.view(batch_size*timesteps, *lines_logits.shape[2:])
             edges = edges.view(batch_size*timesteps, *edges.shape[2:])
             lines = lines.view(batch_size*timesteps, *lines.shape[2:])
@@ -343,9 +349,11 @@ def SampleEdgeLineLogits_video(model, context, masks=None, iterations=1, device=
             edges_pred = torch.sigmoid(edges_logits)
             lines_pred = torch.sigmoid((lines_logits + add_v) * mul_v)
             edges = edges + edges_pred * masks
+            # edges = edges * (1 - masks) + edges_pred * masks
             edges[edges >= 0.25] = 1
             edges[edges < 0.25] = 0
             lines = lines + lines_pred * masks
+            # lines = lines * (1 - masks) + lines_pred * masks
 
             t, _, h, w = edges_pred.shape
             edges_pred = edges_pred.reshape(t, -1, 1)
@@ -467,12 +475,14 @@ def get_frame_mask_edge_line_list(args):
         line_dir = os.path.join(data_root, "JPEGImages", "Full-Resolution_wireframes")
     elif args.input == 'youtubevos':
         data_root = "./datasets/YouTubeVOS/"
+        # mask_dir = "./datasets/YouTubeVOS/test_all_frames/mask_random"
         mask_dir = "./datasets/YouTubeVOS/test_all_frames/mask_random"
         frame_dir = os.path.join(data_root, "test_all_frames", "JPEGImages")
-        if args.edge_gaussian == 0:
-            edge_dir = os.path.join(data_root, "test_all_frames", "edges_old")
-        else :
-            edge_dir = os.path.join(data_root, "test_all_frames", "edges")
+        # if args.edge_gaussian == 0:
+        #     edge_dir = os.path.join(data_root, "test_all_frames", "edges_old")
+        # else :
+        #     edge_dir = os.path.join(data_root, "test_all_frames", "edges")
+        edge_dir = os.path.join(data_root, "test_all_frames", "edges")
         line_dir = os.path.join(data_root, "test_all_frames", "wireframes")
     elif args.input == 'test':
         data_root = "./datasets/YouTubeVOS_small/"
@@ -549,7 +559,6 @@ def read_mask(mpath, w=432, h=240):
 
 #  read frames from video 
 def read_frame_from_videos(vname, w=432, h=240):
-
     lst = os.listdir(vname)
     lst.sort()
     fr_lst = []
@@ -562,6 +571,9 @@ def read_frame_from_videos(vname, w=432, h=240):
         image = cv2.imread(fr)
         image = Image.fromarray(cv2.cvtColor(image, cv2.COLOR_BGR2RGB))
         frames.append(image.resize((w,h)))
+
+    # save the first frame for visualization
+    frames[-1].save('test_inference_frame.png') # test
 
     return frames, idx_lst  
 
@@ -577,8 +589,8 @@ def read_edge_line_PIL(edge_path, line_path, w, h):
         line_list.append(Image.open(os.path.join(line_path, lname)).convert('L').resize((w, h)))
 
     # save the first edge and line for visualization
-    edge_list[0].save('test_inference_edge.png') # test
-    line_list[0].save('test_inference_line.png') # test
+    edge_list[-1].save('test_inference_edge.png') # test
+    line_list[-1].save('test_inference_line.png') # test
 
     return edge_list, line_list
 

@@ -67,11 +67,15 @@ class LaMaBaseInpaintingTrainingModule(nn.Module):
 
         self.load()
         if self.config.DDP:
-            import apex
-            self.generator = apex.parallel.convert_syncbn_model(self.generator)
-            self.discriminator = apex.parallel.convert_syncbn_model(self.discriminator)
-            self.generator = apex.parallel.DistributedDataParallel(self.generator)
-            self.discriminator = apex.parallel.DistributedDataParallel(self.discriminator)
+            # import apex
+            # self.generator = apex.parallel.convert_syncbn_model(self.generator)
+            # self.discriminator = apex.parallel.convert_syncbn_model(self.discriminator)
+            # self.generator = apex.parallel.DistributedDataParallel(self.generator)
+            # self.discriminator = apex.parallel.DistributedDataParallel(self.discriminator)
+            self.generator = torch.nn.SyncBatchNorm.convert_sync_batchnorm(self.generator)
+            self.discriminator = torch.nn.SyncBatchNorm.convert_sync_batchnorm(self.discriminator)
+            self.generator = torch.nn.parallel.DistributedDataParallel(self.generator)
+            self.discriminator = torch.nn.parallel.DistributedDataParallel(self.discriminator)
 
     def load(self):
         if self.test:
@@ -211,11 +215,15 @@ class BaseInpaintingTrainingModule(nn.Module):
                 group['initial_lr'] = config.optimizers['discriminator']['lr']
 
         if self.config.DDP and not test:
-            import apex
-            self.generator = apex.parallel.convert_syncbn_model(self.generator)
-            self.discriminator = apex.parallel.convert_syncbn_model(self.discriminator)
-            self.generator = apex.parallel.DistributedDataParallel(self.generator)
-            self.discriminator = apex.parallel.DistributedDataParallel(self.discriminator)
+            # import apex
+            # self.generator = apex.parallel.convert_syncbn_model(self.generator)
+            # self.discriminator = apex.parallel.convert_syncbn_model(self.discriminator)
+            # self.generator = apex.parallel.DistributedDataParallel(self.generator)
+            # self.discriminator = apex.parallel.DistributedDataParallel(self.discriminator)
+            self.generator = torch.nn.SyncBatchNorm.convert_sync_batchnorm(self.generator)
+            self.discriminator = torch.nn.SyncBatchNorm.convert_sync_batchnorm(self.discriminator)
+            self.generator = torch.nn.parallel.DistributedDataParallel(self.generator)
+            self.discriminator = torch.nn.parallel.DistributedDataParallel(self.discriminator)
 
         if self.config.optimizers['decay_steps'] is not None and self.config.optimizers['decay_steps'] > 0 and not test:
             self.g_scheduler = torch.optim.lr_scheduler.StepLR(self.gen_optimizer, config.optimizers['decay_steps'],
@@ -392,11 +400,15 @@ class BaseInpaintingTrainingModule_video(nn.Module):
                 group['initial_lr'] = config.optimizers['discriminator']['lr']
 
         if self.config.DDP and not test:
-            import apex
-            self.generator = apex.parallel.convert_syncbn_model(self.generator)
-            self.discriminator = apex.parallel.convert_syncbn_model(self.discriminator)
-            self.generator = apex.parallel.DistributedDataParallel(self.generator)
-            self.discriminator = apex.parallel.DistributedDataParallel(self.discriminator)
+            # import apex
+            # self.generator = apex.parallel.convert_syncbn_model(self.generator)
+            # self.discriminator = apex.parallel.convert_syncbn_model(self.discriminator)
+            # self.generator = apex.parallel.DistributedDataParallel(self.generator)
+            # self.discriminator = apex.parallel.DistributedDataParallel(self.discriminator)
+            self.generator = torch.nn.SyncBatchNorm.convert_sync_batchnorm(self.generator)
+            self.discriminator = torch.nn.SyncBatchNorm.convert_sync_batchnorm(self.discriminator)
+            self.generator = torch.nn.parallel.DistributedDataParallel(self.generator)
+            self.discriminator = torch.nn.parallel.DistributedDataParallel(self.discriminator)
 
         if self.config.optimizers['decay_steps'] is not None and self.config.optimizers['decay_steps'] > 0 and not test:
             self.g_scheduler = torch.optim.lr_scheduler.StepLR(self.gen_optimizer, config.optimizers['decay_steps'],

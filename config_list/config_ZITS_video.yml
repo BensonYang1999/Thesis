@@ -13,7 +13,9 @@ SFE_structure: resnet # or transformer
 use_SPI: True # use the structure pre-inpainted image
 
 # model_name: '0522_ZITS_video_firstTry'
-transformer_ckpt_path: './ckpt/0521_ZITS_video_YouTubeVOS_08hole_02valid_1edge_1line_minMaxNorm_oldEdge_bs2_bce/best.pth'
+# transformer_ckpt_path: './ckpt/0521_ZITS_video_YouTubeVOS_08hole_02valid_1edge_1line_minMaxNorm_oldEdge_bs2_bce/best.pth'
+# transformer_ckpt_path: './ckpt/TSR/best.pth'
+transformer_ckpt_path: './ckpt/1220_TSR_fix/best.pth'
 # gen_weights_path0: './ckpt/lama_youtube/InpaintingModel_video_gen.pth'   # Not required at the time of eval
 # dis_weights_path0: './ckpt/lama_youtube/InpaintingModel_video_dis.pth'   # Not required at the time of eval
 structure_upsample_path: './ckpt/StructureUpsampling.pth'

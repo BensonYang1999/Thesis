@@ -341,6 +341,7 @@ class TransformerBlock(nn.Module):
     def __init__(self, hidden=128, num_head=4, dropout=0.1, n_vecs=None, t2t_params=None):
         super().__init__()
         self.attention = MultiHeadedAttention(d_model=hidden, head=num_head, p=dropout)
+        # self.attention = nn.MultiheadAttention(embed_dim=hidden, num_heads=num_head, dropout=dropout)
         self.ffn = FusionFeedForward(hidden, p=dropout, n_vecs=n_vecs, t2t_params=t2t_params)
         self.norm1 = nn.LayerNorm(hidden)
         self.norm2 = nn.LayerNorm(hidden)
@@ -349,6 +350,7 @@ class TransformerBlock(nn.Module):
     def forward(self, input):
         x = self.norm1(input)
         x = input + self.dropout(self.attention(x))
+        # x = input + self.dropout(self.attention(x, x, x)[0])
         y = self.norm2(x)
         x = x + self.ffn(y)
         return x

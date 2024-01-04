@@ -22,9 +22,10 @@ from src.utils import read_frame_from_videos, read_mask
 from src.inpainting_metrics import compute_vfid, compute_lpips
 
 parser = argparse.ArgumentParser()
-parser.add_argument('--root', type=str, default="./results")
+# parser.add_argument('--root', type=str, default="./results")
 # parser.add_argument('--model', type=str, default="0710_ZITS_video_YoutubeVOS_max500k_mix458k_turn470k_frame-1_1_ReFFC_removed_last")
-parser.add_argument('--date', type=str, default="")
+# parser.add_argument('--date', type=str, default="")
+parser.add_argument('--input_dir', type=str, default="")
 parser.add_argument('--onlyMask', action='store_true', default=False)
 parser.add_argument('--split', type=str, default="test")
 parser.add_argument('--cuda', action='store_true', default=False)
@@ -179,6 +180,7 @@ def remove_file_if_exists(file_path):
 
 def process_videos_and_compute_metrics(input_dir, eval_only_mask, split):
     imgs_i3d_feature_all, gts_i3d_feature_all = process_videos(input_dir, eval_only_mask=eval_only_mask, split=split)
+    print("imgs_i3d_feature_all:", imgs_i3d_feature_all)
     metrics = {
         'psnr': compute_avg(f"{input_dir}/PSNR_onlyMask_{eval_only_mask}.csv"),
         'ssim': compute_avg(f"{input_dir}/SSIM_onlyMask_{eval_only_mask}.csv"),
@@ -202,12 +204,14 @@ def main(args):
 
     for type in ["line", "edge"]:
         for th in [25, 50, 75, 100]:
-            condition_dir = f"{args.date}_{type}_{th}percent" if args.date else f"{type}_{th}percent"
-            condition_path = Path(args.root) / condition_dir
+            # condition_dir = f"{args.date}_{type}_{th}percent" if args.date else f"{type}_{th}percent"
+            # condition_path = Path(args.root) / condition_dir
+
+            condition_path = args.input_dir
 
             # Remove existing metric files
             for metric in ["PSNR", "SSIM", "LPIPS", "VIF"]:
-                remove_file_if_exists(condition_path / f"{metric}_onlyMask_{args.onlyMask}.csv")
+                remove_file_if_exists(os.path.join(condition_path, f"{metric}_onlyMask_{args.onlyMask}.csv"))
 
             # Process videos and compute metrics
             imgs_i3d, gts_i3d, metrics = process_videos_and_compute_metrics(condition_path, args.onlyMask, args.split)
@@ -230,8 +234,10 @@ def main(args):
     results_df = append_to_dataframe(results_df, "Average", avg_metrics)
 
     # Save to CSV
-    summary_filename = f"metrics_summary_{args.date}_onlyMask_{args.onlyMask}.csv" if args.date else f"metrics_summary_onlyMask_{args.onlyMask}.csv"
-    results_df.to_csv(Path(args.root) / summary_filename, index=False)
+    # summary_filename = f"metrics_summary_{args.date}_onlyMask_{args.onlyMask}.csv" if args.date else f"metrics_summary_onlyMask_{args.onlyMask}.csv"
+    # results_df.to_csv(Path(args.root) / summary_filename, index=False)
+    summary_filename = f"metrics_summary_onlyMask_{args.onlyMask}.csv"
+    results_df.to_csv(os.path.join(condition_path, summary_filename), index=False)
 
 if __name__ == "__main__":
     # Assume args is already defined

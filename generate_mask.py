@@ -12,6 +12,7 @@ import random
 from matplotlib.path import Path
 import matplotlib.patches as patches
 from PIL import Image
+import argparse
 
 
 class MaskGenerator():
@@ -225,27 +226,56 @@ def random_move_control_points(X, Y, imageHeight, imageWidth, lineVelocity, regi
     new_Y = np.clip(Y, 0, imageWidth - region_width)
     return new_X, new_Y, lineVelocity
 
+# get square mask
+def get_square_mask(video_len, height, width):
+    masks = []
+    for i in range(video_len):
+        mask = np.zeros((height, width))
+        mask[height//4:height-height//4, width//4:width-width//4] = 1
+        mask = Image.fromarray((mask*255).astype(np.uint8))
+        masks.append(mask.convert('L'))
+    return masks
+
+# get whole mask
+def get_whole_mask(video_len, height, width):
+    masks = []
+    rate = 8
+    for i in range(video_len):
+        mask = np.zeros((height, width))
+        mask[height//rate:height-height//rate,width//rate:width-width//rate] = 1
+        mask = Image.fromarray((mask*255).astype(np.uint8))
+        masks.append(mask.convert('L'))
+    return masks
+
 # =============================================================================
 
 
 if __name__=="__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--dataset_name', type=str, default="YouTubeVOS", help='Indicate which training set')
+    parser.add_argument('--dataset_split', type=str, default="test", help='Indicate which split of the dataset')
+    parser.add_argument('--mask_type', type=str, default="random", help='Indicate which type of mask to generate')
+    args = parser.parse_args()
     # input is directory of RGB files
+    rgb_dir = "./datasets/{}/{}_all_frames/JPEGImages".format(args.dataset_name, args.dataset_split)
     # rgb_dir = "./datasets/YouTubeVOS/test_all_frames/JPEGImages"
-    rgb_dir = "./datasets/DAVIS/JPEGImages/Full-Resolution"
+    # rgb_dir = "./datasets/DAVIS/JPEGImages/Full-Resolution"
 
     # get the parent folder of rgb_dir
     # mask_brush_dir = os.path.join(os.path.dirname(rgb_dir), "mask_brush")
-    mask_random_dir = os.path.join(os.path.dirname(rgb_dir), "mask_random")
+    # mask_dir = os.path.join(os.path.dirname(rgb_dir), "mask_random")
+    mask_dir = os.path.join(os.path.dirname(rgb_dir), 'mask_'+args.mask_type)
+    
     # make sure mask_dir exists
     # if not os.path.exists(mask_brush_dir):
         # os.makedirs(mask_brush_dir)
-    if not os.path.exists(mask_random_dir):
-        os.makedirs(mask_random_dir)
+    if not os.path.exists(mask_dir):
+        os.makedirs(mask_dir)
 
     # print("Generating brush masks...under folder: ", mask_brush_dir)
-    print("Generating random masks...under folder: ", mask_random_dir)
+    print("Generating random masks...under folder: ", mask_dir)
 
-    brush_mask_generator = MaskGenerator(240, 432, 1, rand_seed=42)
+    # brush_mask_generator = MaskGenerator(240, 432, 1, rand_seed=42)
 
     # subfolder under rgb_dir folder are the names of the videos
     # and the image files under the subfolder are the frames images
@@ -253,21 +283,29 @@ if __name__=="__main__":
     for video_name in tqdm(os.listdir(rgb_dir)):
         video_dir = os.path.join(rgb_dir, video_name)
         # video_mask_brush_dir = os.path.join(mask_brush_dir, video_name)
-        video_mask_random_dir = os.path.join(mask_random_dir, video_name)
+        video_mask_dir = os.path.join(mask_dir, video_name)
         # make sure video_mask_dir exists
         # if not os.path.exists(video_mask_brush_dir):
             # os.makedirs(video_mask_brush_dir)
-        if not os.path.exists(video_mask_random_dir):
-            os.makedirs(video_mask_random_dir)
+        if not os.path.exists(video_mask_dir):
+            os.makedirs(video_mask_dir)
 
-        random_mask_list = create_random_shape_with_random_motion(len(os.listdir(video_dir)), 240, 432)
+        if args.mask_type == "random":
+            mask_list = create_random_shape_with_random_motion(len(os.listdir(video_dir)), 240, 432)
+        elif args.mask_type == "square":
+            mask_list = get_square_mask(len(os.listdir(video_dir)), 240, 432)
+        elif args.mask_type == "whole":
+            mask_list = get_whole_mask(len(os.listdir(video_dir)), 240, 432)
+        else:
+            raise NotImplementedError("mask type {} not implemented".format(args.mask_type))
+        
         # transform the random mask list to a list from Image to numpy array
-        random_mask_list = [np.array(mask) for mask in random_mask_list]
+        mask_list = [np.array(mask) for mask in mask_list]
 
         for i, frame_name in enumerate(os.listdir(video_dir)):
             frame_path = os.path.join(video_dir, frame_name)
             # mask_brush_path = os.path.join(video_mask_brush_dir, frame_name)
-            mask_random_path = os.path.join(video_mask_random_dir, frame_name) 
+            mask_path = os.path.join(video_mask_dir, frame_name) 
             # mask = brush_mask_generator.sample()
             # cv2.imwrite(mask_brush_path, (1-mask)*255)
-            cv2.imwrite(mask_random_path, random_mask_list[i])
+            cv2.imwrite(mask_path, mask_list[i])

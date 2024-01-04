@@ -169,7 +169,7 @@ class LSM_HAWP:
 
                 # Draw edge image (.png)
                 img_rgb = cv2.imread(img_path)
-                edge = canny(rgb2gray(img_rgb), sigma=2, mask=None).astype(np.float)*255
+                edge = canny(rgb2gray(img_rgb), sigma=2, mask=None).astype(float)*255
                 img_edge = im.fromarray(edge)
                 if img_edge.mode != 'L':
                     img_edge = img_edge.convert('L')

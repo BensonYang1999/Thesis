@@ -6,9 +6,9 @@ import torch
 from datasets.dataset_TSR import ContinuousEdgeLineDatasetMask, ContinuousEdgeLineDatasetMaskFinetune
 from datasets.dataset_TSR import ContinuousEdgeLineDatasetMask_video
 from src.TSR_trainer import TrainerConfig, TrainerForContinuousEdgeLine, TrainerForEdgeLineFinetune
-from src.TSR_trainer import TrainerForContinuousEdgeLine_video
+from src.TSR_trainer import TrainerForContinuousEdgeLine_video, TrainerForContinuousEdgeLine_plus
 from src.models.TSR_model import EdgeLineGPT256RelBCE, EdgeLineGPTConfig
-from src.models.TSR_model import EdgeLineGPT256RelBCE_video
+from src.models.TSR_model import EdgeLineGPT256RelBCE_video, EdgeLineGPT256RelBCE_plus
 from src.utils import set_seed
 
 # torch.cuda.set_per_process_memory_fraction(0.8, 1)
@@ -34,7 +34,10 @@ def main_worker(rank, opts):
     # Define the model
     model_config = EdgeLineGPTConfig(embd_pdrop=0.0, resid_pdrop=0.0, n_embd=opts.n_embd, block_size=32,
                                      attn_pdrop=0.0, n_layer=opts.n_layer, n_head=opts.n_head, ref_frame_num=opts.ref_frame_num)
-    IGPT_model = EdgeLineGPT256RelBCE_video(model_config, opts, device=gpu)
+    if not opts.exp:
+        IGPT_model = EdgeLineGPT256RelBCE_video(model_config, opts, device=gpu)
+    else:
+        IGPT_model = EdgeLineGPT256RelBCE_plus(model_config)
 
     # Define the dataset
     if not opts.MaP:
@@ -57,15 +60,19 @@ def main_worker(rank, opts):
                                  weight_decay=0, lr_decay=True,
                                  warmup_iterations=1500,
                                  final_iterations=train_epochs * iterations_per_epoch / opts.world_size,
-                                 ckpt_path=opts.ckpt_path, num_workers=12, GPU_ids=opts.GPU_ids,
+                                 ckpt_path=opts.ckpt_path, num_workers=8, GPU_ids=opts.GPU_ids,
                                  world_size=opts.world_size,
                                  AMP=opts.AMP, print_freq=opts.print_freq)
 
     if not opts.MaP:
         # trainer = TrainerForContinuousEdgeLine(IGPT_model, train_dataset, test_dataset, train_config, gpu, rank,
         #                                        iterations_per_epoch, logger=logger)
-        trainer = TrainerForContinuousEdgeLine_video(IGPT_model, train_dataset, test_dataset, train_config, gpu, rank,
-                                               iterations_per_epoch, logger=logger)
+        if not opts.exp:
+            trainer = TrainerForContinuousEdgeLine_video(IGPT_model, train_dataset, test_dataset, train_config, gpu, rank,
+                                                         iterations_per_epoch, logger=logger)
+        else:
+            trainer = TrainerForContinuousEdgeLine_plus(IGPT_model, train_dataset, test_dataset, train_config, gpu, rank,
+                                                iterations_per_epoch, logger=logger)
     else:  # TODO
         trainer = TrainerForEdgeLineFinetune(IGPT_model, train_dataset, test_dataset, train_config, gpu, rank,
                                              iterations_per_epoch, logger=logger)
@@ -88,7 +95,7 @@ if __name__ == '__main__':
     #                     help='irregular rate, coco rate, addition rate')  # for video
     # parser.add_argument('--mask_rates', type=list, default=[0.4, 0.8, 1.0],
     #                     help='irregular rate, coco rate, addition rate')
-    parser.add_argument('--batch_size', type=int, default=32)
+    parser.add_argument('--batch_size', type=int, default=1)
     parser.add_argument('--train_epoch', type=int, default=12, help='how many epochs')
     parser.add_argument('--print_freq', type=int, default=100, help='While training, the freq of printing log')
     parser.add_argument('--validation_path', type=str, default=None, help='where is the validation set of ImageNet')
@@ -96,8 +103,8 @@ if __name__ == '__main__':
     # parser.add_argument('--valid_mask_path', type=str, default=None)
     # parser.add_argument('--image_w', type=int, default=432, help='input frame width')
     # parser.add_argument('--image_h', type=int, default=240, help='input frame height')
-    parser.add_argument('--image_w', type=int, default=256, help='input frame width')
-    parser.add_argument('--image_h', type=int, default=256, help='input frame height')
+    parser.add_argument('--image_w', type=int, default=432, help='input frame width')
+    parser.add_argument('--image_h', type=int, default=240, help='input frame height')
     parser.add_argument('--image_size', type=int, default=256, help='input sequence length = image_size*image_size')
     parser.add_argument('--resume_ckpt', type=str, default='latest.pth', help='start from where, the default is latest')
     # Mask and predict finetune
@@ -110,7 +117,7 @@ if __name__ == '__main__':
     parser.add_argument('--lr', type=float, default=4.24e-4)
     # AMP
     parser.add_argument('--nodes', type=int, default=1, help='how many machines')
-    parser.add_argument('--gpus', type=int, default=2, help='how many GPUs in one node')
+    parser.add_argument('--gpus', type=int, default=1, help='how many GPUs in one node')
     parser.add_argument('--AMP', action='store_true', help='Automatic Mixed Precision')
     parser.add_argument('--local_rank', type=int, default=-1, help='the id of this machine')
     # for video
@@ -120,6 +127,9 @@ if __name__ == '__main__':
     # add the choice to decide the loss function with l1 or mse or binary cross entropy with choice
     parser.add_argument('--loss_choice', type=str, default="bce", help='the choice of loss function: l1, mse, bce')
     parser.add_argument('--edge_gaussian', type=int, default=0, help='the sigma of gaussian kernel for edge')
+
+    # experimental model
+    parser.add_argument('--exp', action='store_true', help='whether to use the experimental model')
 
     # show th loss_coice and edge_gaussian and the loss_hole_valid_weight and loss_edge_line_weight
     print("The loss_choice is: ", parser.parse_args().loss_choice)

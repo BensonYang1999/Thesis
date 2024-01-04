@@ -8,10 +8,12 @@ from scipy import ndimage as ndi
 from multiprocessing import Pool, cpu_count
 from tqdm import tqdm
 
-# dataset_roots = {'YouTubeVOS': './datasets/YouTubeVOS/train_all_frames/JPEGImages'}
-# edge_roots = {'YouTubeVOS': './datasets/YouTubeVOS/train_all_frames/edges_old_1024'}
-dataset_roots = {'DAVIS': './datasets/DAVIS/JPEGImages/Full-Resolution'}
-edge_roots = {'DAVIS': './datasets/DAVIS/JPEGImages/Full-Resolution_edges'}
+dataset_roots = {'YouTubeVOS': './datasets/YouTubeVOS/train_all_frames/JPEGImages'}
+edge_roots = {'YouTubeVOS': './datasets/YouTubeVOS/train_all_frames/edges'}
+# dataset_roots = {'YouTubeVOS': './datasets/YouTubeVOS/test_all_frames/JPEGImages'}
+# edge_roots = {'YouTubeVOS': './datasets/YouTubeVOS/test_all_frames/edges'}
+# dataset_roots = {'DAVIS': './datasets/DAVIS/JPEGImages/Full-Resolution'}
+# edge_roots = {'DAVIS': './datasets/DAVIS/JPEGImages/Full-Resolution_edges'}
 
 def process_video(args):
     video_path, output_edge_path = args

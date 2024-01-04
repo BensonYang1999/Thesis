@@ -178,7 +178,7 @@ class AxialAttention(nn.Module):
 class BlockAxial(AxialAttention):
 
     def __init__(self, config):
-        super().__init__(config.n_embd, config.n_head, config.attn_pdrop, config.resid_pdrop, 32, 32)
+        super().__init__(config.n_embd, config.n_head, config.attn_pdrop, config.resid_pdrop, 30, 54)
 
 
 class CausalSelfAttention(nn.Module):

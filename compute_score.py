@@ -47,7 +47,8 @@ fid_fn = FrechetInceptionDistance(feature=64)
 #     return output
 
 def read_frame_from_videos(vname , prefix:str):
-    lst = os.listdir(vname)
+    # lst = os.listdir(vname)
+    lst = [f for f in os.listdir(vname) if f.endswith(".jpg")]
     lst.sort()
     fr_lst = [vname+'/'+name for name in lst if name.startswith(prefix)]
     frames = []
@@ -141,10 +142,11 @@ def compute_fid(gt, pred):
 #     return psnr_scores, ssim_scores
 
 # define a function to compute the desire metric for each video
-def compute_metrics(pred_dir, evalOnlyMask=False):
+def compute_metrics(pred_dir, evalOnlyMask=False, split="test"):
+    # print("pred_dir", pred_dir)
     vname = pred_dir.split('/')[-1]
-    gt_dir = os.path.join("./datasets/YouTubeVOS/valid_all_frames/JPEGImages", vname)
-    mask_dir = os.path.join("./datasets/YouTubeVOS/valid_all_frames/mask_random", vname)
+    gt_dir = os.path.join(f"./datasets/YouTubeVOS/{split}_all_frames/JPEGImages", vname)
+    mask_dir = os.path.join(f"./datasets/YouTubeVOS/{split}_all_frames/mask_random", vname)
     # read all the images with no prefix
     gt_images = read_frame_from_videos(gt_dir, "")
     # read all the images with no prefix
@@ -154,7 +156,7 @@ def compute_metrics(pred_dir, evalOnlyMask=False):
 
     # compute the PSNR for each pair of images
     psnr_scores, ssim_scores, lpips_scores = [], [], []
-    vif_scores, uqi_scores, mse_scores, rmse_scores, scc_scores, rase_scores, sam_scores, msssim_scores, psnrb_scores
+    vif_scores, uqi_scores, mse_scores, rmse_scores, scc_scores, rase_scores, sam_scores, msssim_scores, psnrb_scores = [], [], [], [], [], [], [], [], []
     for gt_image, pred_image, mask_image in zip(gt_images, pred_images, mask_images):
         gt_img = np.array(gt_image)
         pred_img = np.array(pred_image)
@@ -168,7 +170,8 @@ def compute_metrics(pred_dir, evalOnlyMask=False):
             gt_img = gt_img * np.stack([mask_img, mask_img, mask_img], axis=-1)
 
         psnr_score = measure_psnr(gt_img, pred_img, data_range=255)
-        ssim_score = measure_ssim(gt_img, pred_img, data_range=255, multichannel=True, win_size=65)
+        # ssim_score = measure_ssim(gt_img, pred_img, data_range=255, multichannel=True, win_size=65)
+        ssim_score = measure_ssim(gt_img, pred_img, data_range=255, channel_axis=2)
         lpips_score = compute_lpips(gt_img, pred_img)
         vif_score = vifp(gt_img, pred_img)
         uqi_score = uqi(gt_img, pred_img)
@@ -197,7 +200,7 @@ def compute_metrics(pred_dir, evalOnlyMask=False):
 
     return psnr_scores, ssim_scores, lpips_scores, vif_scores, uqi_scores, mse_scores, rmse_scores, scc_scores, rase_scores, sam_scores, msssim_scores, psnrb_scores
 
-def write_scores(csv_path, scores):
+def write_scores(csv_path, scores, video_id):
     with open(csv_path, "a") as f:
         f.write(video_id + ",")
         for score in scores:
@@ -212,7 +215,7 @@ def process_videos(input_dir, evalOnlyMask=False):
     # loop through each subfolder
     for subfolder in tqdm.tqdm(subfolders):
         # compute the metrics for each subfolder
-        psnr_scores, ssim_scores, lpips_scores, vif_scores, uqi_scores, mse_scores, rmse_scores, scc_scores, rase_scores, sam_scores, msssim_scores, psnrb_scores = compute_metrics(subfolder, evalOnlyMask)
+        psnr_scores, ssim_scores, lpips_scores, vif_scores, uqi_scores, mse_scores, rmse_scores, scc_scores, rase_scores, sam_scores, msssim_scores, psnrb_scores = compute_metrics(subfolder, evalOnlyMask, args.split)
         print(f"Video: {subfolder.split('/')[-1]}, PSNR: {np.mean(psnr_scores)}, SSIM: {np.mean(ssim_scores)}, LPIPS: {np.mean(lpips_scores)}, VIF: {np.mean(vif_scores)}, UQI: {np.mean(uqi_scores)}, MSE: {np.mean(mse_scores)}, RMSE: {np.mean(rmse_scores)}, SCC: {np.mean(scc_scores)}, RASE: {np.mean(rase_scores)}, SAM: {np.mean(sam_scores)}, MSSSIM: {np.mean(msssim_scores)}, PSNRB: {np.mean(psnrb_scores)}")
 
         # save the results
@@ -233,29 +236,29 @@ def process_videos(input_dir, evalOnlyMask=False):
 
         
         # save PSNR scores
-        write_scores(psnr_csv_path, psnr_scores)
+        write_scores(psnr_csv_path, psnr_scores, video_id)
         # save SSIM scores
-        write_scores(ssim_csv_path, ssim_scores)
+        write_scores(ssim_csv_path, ssim_scores, video_id)
         # save LPIPS scores
-        write_scores(lpips_csv_path, lpips_scores)
+        write_scores(lpips_csv_path, lpips_scores, video_id)
         # save VIF scores
-        write_scores(vif_csv_path, vif_scores)
+        write_scores(vif_csv_path, vif_scores, video_id)
         # save UQI scores
-        write_scores(uqi_csv_path, uqi_scores)
+        write_scores(uqi_csv_path, uqi_scores, video_id)
         # save MSE scores
-        write_scores(mse_csv_path, mse_scores)
+        write_scores(mse_csv_path, mse_scores, video_id)
         # save RMSE scores
-        write_scores(rmse_csv_path, rmse_scores)
+        write_scores(rmse_csv_path, rmse_scores, video_id)
         # save SCC scores
-        write_scores(scc_csv_path, scc_scores)
+        write_scores(scc_csv_path, scc_scores, video_id)
         # save RASE scores
-        write_scores(rase_csv_path, rase_scores)
+        write_scores(rase_csv_path, rase_scores, video_id)
         # save SAM scores
-        write_scores(sam_csv_path, sam_scores)
+        write_scores(sam_csv_path, sam_scores, video_id)
         # save MSSSIM scores
-        write_scores(msssim_csv_path, msssim_scores)
+        write_scores(msssim_csv_path, msssim_scores, video_id)
         # save PSNRB scores
-        write_scores(psnrb_csv_path, psnrb_scores)
+        write_scores(psnrb_csv_path, psnrb_scores, video_id)
         
 
 if __name__ == "__main__":
@@ -269,6 +272,7 @@ if __name__ == "__main__":
     parser.add_argument('--input_dir', type=str, default="../FuseFormer/2023-07-03_gen_00050_scratch_line_gt0_sample10_results")
     parser.add_argument('--onlyMask', action='store_true', default=False)
     parser.add_argument('--runAll', action='store_true', default=False)
+    parser.add_argument('--split', type=str, default="test")
     args = parser.parse_args()
 
     # show whethre only mask is evaluated
@@ -354,7 +358,7 @@ if __name__ == "__main__":
         msssim_avg = calculate_avereage_with_th(msssim_dir, line_th, edge_th)
         psnrb_avg = calculate_avereage_with_th(psnrb_dir, line_th, edge_th)
 
-        df = df.append({"line_th": line_th, "edge_th": edge_th, "psnr": psnr_avg, "ssim": ssim_avg, "lpips": lpips_avg, "vif": vif_avg, "uqi"}, ignore_index=True)
+        df = df.append({"line_th": line_th, "edge_th": edge_th, "psnr": psnr_avg, "ssim": ssim_avg, "lpips": lpips_avg, "vif": vif_avg, "uqi": uqi_avg}, ignore_index=True)
 
     # save the results with the header
     df.to_csv(os.path.join(args.input_dir, f"metrics_all_onlyMask_{args.onlyMask}.csv"), index=False)
