@@ -1,8 +1,21 @@
-# SERVI: Structure Enhanced Regional Video Inpainting
+# SERVI: Structure Enhanced Regional Video Inpainting (Paper)
 by [MuXi Chen](https://github.com/ChenMuHsi), YuChee Tseng, YenAnn Chen
 
 > [!IMPORTANT]  
 > This work is referencing to [ZITS](https://github.com/DQiaole/ZITS_inpainting) and [FuseFormer](https://github.com/ruiliu-ai/FuseFormer)
+
+![system architecture](./imgs/sys_arch.jpg)
+
+### TODO:
+- [ ] Overall Workflow figure
+- [ ] Data preparing workflow figure
+- [ ] TSR training code re-organized
+- [ ] FTR training code re-organized
+- [ ] Bug of VFID score shown during training process
+- [ ] Wvaluation process 
+- [ ] Future work list
+- [ ] Fix bug of compute summary
+
 
 ## Dataset
 ### 1. YoutubeVOS

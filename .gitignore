@@ -1,5 +1,6 @@
-*.png
-*.jpg
+# *.png
+# *.jpg
+*.cpython-36.pyc
 *.zip
 datasets/DAVIS/
 datasets/Indoor/
@@ -12,6 +13,7 @@ my_testing/
 src/__pycache__/
 src/losses/__pycache__/
 src/models/__pycache__/
+src/Fuseformer/__pycache__/
 wireframes/
 *.pyc
 src/models/__pycache__
@@ -24,3 +26,4 @@ ckpt/*
 results/*
 *.csv
 segment_model/
+__pycache__/

@@ -547,7 +547,7 @@ def read_mask(mpath, w=432, h=240):
         m = Image.open(os.path.join(mpath, m))
         m = m.resize((w, h), Image.BILINEAR)
         m = np.array(m.convert('L'))
-        m = np.array(m > 125).astype(np.uint8) # revised in 1026
+        m = np.array(m > 127).astype(np.uint8) # revised in 1026
         m = cv2.dilate(m, cv2.getStructuringElement(
             cv2.MORPH_CROSS, (3, 3)), iterations=4)
         masks.append(Image.fromarray(m*255)) # 0, 255
