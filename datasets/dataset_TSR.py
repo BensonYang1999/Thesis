@@ -22,6 +22,8 @@ import torchvision.transforms as transforms
 from src.Fuseformer.utils import create_random_shape_with_random_motion
 from src.Fuseformer.utils import Stack, ToTorchFormatTensor, GroupRandomHorizontalFlip
 
+import pandas as pd
+
 sys.path.append('..')
 
 
@@ -278,8 +280,9 @@ class ContinuousEdgeLineDatasetMask_video(Dataset):  # mostly refer to FuseForme
         self.opts = opts
 
         if name == 'YouTubeVOS':
-            vid_lst_prefix = os.path.join(root, name, split+'_all_frames/JPEGImages')
-            edge_lst_prefix = os.path.join(root, name, split+'_all_frames/edges')
+            # vid_lst_prefix = os.path.join(root, name, split+'_all_frames/JPEGImages')
+            vid_lst_prefix = os.path.join(root, name, split+'_all_frames/gray')
+            edge_lst_prefix = os.path.join(root, name, split+'_all_frames/edges_3')
             line_lst_prefix = os.path.join(root, name, split+'_all_frames/wireframes')
             vid_lst = os.listdir(vid_lst_prefix)
             edge_lst = os.listdir(edge_lst_prefix)
@@ -304,7 +307,7 @@ class ContinuousEdgeLineDatasetMask_video(Dataset):  # mostly refer to FuseForme
 
         self._to_tensors = transforms.Compose([
             Stack(),
-            ToTorchFormatTensor(), ])
+            ToTorchFormatTensor(),])
 
         self._to_tensors_minMaxNorm = transforms.Compose([
             Stack(),
@@ -347,18 +350,22 @@ class ContinuousEdgeLineDatasetMask_video(Dataset):  # mostly refer to FuseForme
             all_masks = [os.path.join(mask_name, name) for name in sorted(os.listdir(mask_name))]
 
         ref_index = self.get_ref_index(len(all_frames), self.sample_length)
+        # ref_index = self.get_fix_index(len(all_frames), self.sample_length)
+        # ref_index = self.get_same_index(len(all_frames), self.sample_length)
         frames = []
         edges = []
         lines = []
         masks = []
 
         for idx in ref_index:
-            img = Image.open(all_frames[idx]).convert('RGB')
+            # img = Image.open(all_frames[idx]).convert('RGB')
+            img = Image.open(all_frames[idx]).convert('L')
             img = img.resize(self.size)
             frames.append(img)
             
             edge = Image.open(all_edges[idx]).convert('L')
             edge = edge.resize(self.size)
+            edge = Image.fromarray(np.array(np.array(edge) > 50).astype(np.uint8)*255)
             edges.append(edge)
 
             line = Image.open(all_lines[idx]).convert('L')
@@ -383,12 +390,16 @@ class ContinuousEdgeLineDatasetMask_video(Dataset):  # mostly refer to FuseForme
             lines = GroupRandomHorizontalFlip()(lines, prob)
 
         # To tensors
-        frame_tensors = self._to_tensors(frames)*2.0 - 1.0 # normalize RGB to [-1, 1] -> from fuseformer
-        # frame_tensors = self._to_tensors_stdNorm(frames) 
-        # edge_tensors = self._to_tensors(edges)
-        edge_tensors = self._to_tensors_minMaxNorm(edges)  # try to normalize
-        # line_tensors = self._to_tensors(lines)
-        line_tensors = self._to_tensors_minMaxNorm(lines) # try to normalize
+        # frame_tensors = self._to_tensors(frames)*2.0 - 1.0 # normalize RGB to [-1, 1] -> from fuseformer
+        # # frame_tensors = self._to_tensors_stdNorm(frames) 
+        # # edge_tensors = self._to_tensors(edges)
+        # edge_tensors = self._to_tensors_minMaxNorm(edges)  # try to normalize
+        # # line_tensors = self._to_tensors(lines)
+        # line_tensors = self._to_tensors_minMaxNorm(lines) # try to normalize
+        # mask_tensors = self._to_tensors(masks)
+        frame_tensors = self._to_tensors(frames)
+        edge_tensors = self._to_tensors(edges)
+        line_tensors = self._to_tensors(lines)
         mask_tensors = self._to_tensors(masks)
         meta = {'frames': frame_tensors, 'masks': mask_tensors, 'edges': edge_tensors, 'lines': line_tensors, 
                 'name': video_name.split('/')[-1], 'idxs': [all_frames[idx].split('/')[-1] for idx in ref_index]}
@@ -401,4 +412,105 @@ class ContinuousEdgeLineDatasetMask_video(Dataset):  # mostly refer to FuseForme
         else:
             pivot = random.randint(0, length-sample_length)
             ref_index = [pivot+i for i in range(sample_length)]
+        return ref_index
+
+    def get_fix_index(self, length, sample_length):
+        if sample_length == 5:
+            pivot = random.randint(7, length-8)
+            ref_index = [pivot-7, pivot-3, pivot, pivot+3, pivot+7]
+        else:
+            raise NotImplementedError
+        return ref_index
+
+    def get_same_index(self, length, sample_length):
+        pivot = random.randint(0, length-1)
+        ref_index = [pivot for i in range(sample_length)]
+        return ref_index
+
+class FastEdgeLineDataset(Dataset):
+    def __init__(self, opts, sample=5, size=(432,240), split='train', name='YouTubeVOS', root='./datasets'):
+        self.split = split
+        self.sample_length = sample
+        self.size = self.w, self.h = size
+        self.opts = opts
+
+        if name == 'YouTubeVOS':
+            path_prefix = os.path.join(root, name, split+'_all_frames', 'pickle')
+            lst = sorted(os.listdir(path_prefix))
+            self.names = [os.path.join(path_prefix, vid) for vid in lst]
+            self.mask_names = [os.path.join(root, name, split+'_all_frames', 'mask_random', vid[:-4]) for vid in lst]
+        else:
+            raise NotImplementedError
+
+    def __len__(self):
+        return len(self.names)
+    
+    def to_tensor(self, imgs):
+        if imgs.ndim == 3:
+            imgs = np.expand_dims(imgs, axis=3) # [L, H, W] -> [L, H, W, 1]
+        imgs = torch.from_numpy(imgs).permute(0, 3, 1, 2).contiguous()
+        imgs = imgs.float().div(255)
+        return imgs
+
+    def __getitem__(self, index):
+        name = self.names[index]
+        df = pd.read_pickle(name)
+
+        frames = np.array(df['gray'].tolist())
+        edges = np.array(df['edges_3'].tolist())
+        lines = np.array(df['wireframes'].tolist())
+        if self.split == 'train':
+            masks = np.array(create_random_shape_with_random_motion(
+                len(df), imageHeight=self.h, imageWidth=self.w))
+        else:
+            mask_name = self.mask_names[index]
+            mask_lst = sorted(os.listdir(mask_name))
+            masks_path = [os.path.join(mask_name, name) for name in mask_lst]
+            masks = []
+            for idx in masks_path:
+                mask = Image.open(idx)
+                mask = mask.resize(self.size, Image.BILINEAR)
+                mask = np.array(mask.convert('L'))
+                mask = np.array(mask > 127).astype(np.uint8)
+                mask = cv2.dilate(mask, cv2.getStructuringElement(cv2.MORPH_CROSS, (3, 3)), iterations=4)
+                masks.append(Image.fromarray(mask*255))
+            masks = np.array(masks)
+
+        
+        ref_index = self.get_ref_index(len(df), self.sample_length)
+
+        frames = frames[ref_index]
+        edges = edges[ref_index]
+        lines = lines[ref_index]
+        masks = masks[ref_index]
+
+        frames = self.to_tensor(frames)
+        edges = self.to_tensor(edges)
+        lines = self.to_tensor(lines)
+        masks = self.to_tensor(masks)
+
+        meta = {'frames': frames, 'masks': masks, 'edges': edges, 'lines': lines,
+                'name': name.split('/')[-1][:-4], 'idxs': [df['filename'][idx] for idx in ref_index]}
+        return meta
+    
+    def get_ref_index(self, length, sample_length):
+        if random.uniform(0, 1) > 0.5:
+            ref_index = random.sample(range(length), sample_length)
+            ref_index.sort()
+        else:
+            pivot = random.randint(0, length-sample_length)
+            ref_index = [pivot+i for i in range(sample_length)]
+        return ref_index
+
+    def get_fix_index(self, length, sample_length):
+        if sample_length == 5:
+            pivot = random.randint(7, length-8)
+            ref_index = [pivot-7, pivot-3, pivot, pivot+3, pivot+7]
+        else:
+            raise NotImplementedError
+        return ref_index
+
+    def get_same_index(self, length, sample_length):
+        pivot = random.randint(0, length-1)
+        ref_index = [pivot for i in range(sample_length)]
         return ref_index

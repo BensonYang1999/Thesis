@@ -27,3 +27,5 @@ results/*
 *.csv
 segment_model/
 __pycache__/
+12*
+0*

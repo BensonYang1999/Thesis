@@ -109,7 +109,7 @@ class Encoder(nn.Module):
 
 
 class InpaintGenerator(BaseNetwork):
-    def __init__(self, init_weights=True, input_ch=6, ref_frames=5):
+    def __init__(self, init_weights=True, input_ch=6, out_ch=2, ref_frames=5):
         super(InpaintGenerator, self).__init__()
         channel = 256  # Original fuseFormer
         # channel = 512  # for ZITS_video
@@ -149,7 +149,8 @@ class InpaintGenerator(BaseNetwork):
             deconv(64, 64, kernel_size=3, padding=1),
             nn.LeakyReLU(0.2, inplace=True),
             # nn.Conv2d(64, 3, kernel_size=3, stride=1, padding=1)  # -> original fuseformer
-            nn.Conv2d(64, 2, kernel_size=3, stride=1, padding=1)  # for ZITS, output line and edge
+            # nn.Conv2d(64, 2, kernel_size=3, stride=1, padding=1)  # for ZITS, output line and edge
+            nn.Conv2d(64, out_ch, kernel_size=3, stride=1, padding=1)  # for ZITS, output structure
         )
 
         if init_weights:

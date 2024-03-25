@@ -398,6 +398,81 @@ def SampleEdgeLineLogits_video(model, context, masks=None, iterations=1, device=
     return edges, lines
 
 
+def SampleStructLogits_video(model, context, masks=None, iterations=1, device='cuda', add_v=0, mul_v=4):
+    [frames, structs] = context
+    frames = frames.to(device)
+    structs = structs.to(device)
+    masks = masks.to(device)
+    frames = frames * (1 - masks)
+    structs = structs * (1 - masks)
+
+    # Now we assume that the first dimension of img, edge, line, and mask is the batch size
+    # and the second dimension is the time dimension.
+    # So we need to iterate over these dimensions.
+    batch_size, timesteps, _, h, w = frames.shape
+
+    model.eval()
+    with torch.no_grad():
+        for i in range(iterations):
+            structs_logits = model.forward_with_logits(frames, structs, masks=masks)
+            
+            # print(edges_logits.shape)
+            structs_logits = structs_logits.view(batch_size*timesteps, *structs_logits.shape[2:])
+            # print(edges_logits.shape)
+            # input()
+            structs = structs.view(batch_size*timesteps, *structs.shape[2:])
+            masks = masks.view(batch_size*timesteps, *masks.shape[2:])
+            
+            # sigmoid activation
+            # structs_pred = torch.sigmoid(structs_logits)
+            # # lines_pred = torch.sigmoid((lines_logits + add_v) * mul_v)
+            # structs = structs + structs_pred * masks
+            # # edges = edges + edges_pred * masks
+            # # edges[edges >= 0.25] = 1
+            # # edges[edges < 0.25] = 0
+            # # lines = lines + lines_pred * masks
+
+            # tanh activation
+            structs_pred = (structs_logits + 1) / 2
+            structs = structs + structs_pred * masks
+
+            t, _, h, w = structs_pred.shape
+            structs_pred = structs_pred.reshape(t, -1, 1)
+            masks = masks.reshape(t, -1)
+
+            structs_probs = torch.cat([1 - structs_pred, structs_pred], dim=-1)
+            structs_probs[:, :, 1] += 0.5
+            structs_max_probs = structs_probs.max(dim=-1)[0] + (1 - masks) * (-100)
+
+            indices = torch.sort(structs_max_probs, dim=-1, descending=True)[1]
+
+            for ii in range(t):
+                keep = int((i + 1) / iterations * torch.sum(masks[ii, ...]))
+
+                assert torch.sum(masks[ii][indices[ii, :keep]]) == keep, "Error!!!"
+                masks[ii][indices[ii, :keep]] = 0
+
+            masks = masks.view(batch_size, timesteps, 1, h, w)
+            structs = structs.view(batch_size, timesteps, 1, h, w)
+            structs = structs * (1 - masks)
+
+    # save the first edge, line for visualization
+    # from torchvision.utils import save_image
+    # save_image(edges[0, 0], 'TSR_inference_edge_0.png') # test
+    # save_image(lines[0, 0], 'TSR_inference_line_0.png') # test
+    # # save second
+    # save_image(edges[0, 1], 'TSR_inference_edge_1.png') # test
+    # save_image(lines[0, 1], 'TSR_inference_line_1.png') # test
+
+    # save_image(edges[0, 2], 'TSR_inference_edge_2.png') # test
+    # save_image(lines[0, 2], 'TSR_inference_line_2.png') # test
+
+    # save_image(edges[0, 3], 'TSR_inference_edge_3.png') # test
+    # save_image(lines[0, 3], 'TSR_inference_line_3.png') # test
+
+    return structs
+
+
 
 def get_lr_schedule_with_warmup(optimizer, num_warmup_steps, milestone_step, gamma, last_epoch=-1):
     """ Create a schedule with a learning rate that decreases linearly after
