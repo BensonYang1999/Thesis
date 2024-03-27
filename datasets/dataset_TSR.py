@@ -514,3 +514,129 @@ class FastEdgeLineDataset(Dataset):
         pivot = random.randint(0, length-1)
         ref_index = [pivot for i in range(sample_length)]
         return ref_index
+
+from skimage.feature import canny
+class EdgeLineDataset_v2(Dataset):
+    def __init__(self, opts, sample=5, size=(432,240), split='train', name='YouTubeVOS', root='./datasets', edge_sig=2):
+        self.split = split
+        self.sample_length = sample
+        self.size = self.w, self.h = size
+        self.opts = opts
+        self.sig = edge_sig
+
+        if name == 'YouTubeVOS':
+            # vid_lst_prefix = os.path.join(root, name, split+'_all_frames/JPEGImages')
+            vid_lst_prefix = os.path.join(root, name, split+'_all_frames/gray')
+            line_lst_prefix = os.path.join(root, name, split+'_all_frames/wireframes')
+            vid_lst = os.listdir(vid_lst_prefix)
+            line_lst = os.listdir(line_lst_prefix)
+            self.video_names = [os.path.join(vid_lst_prefix, name) for name in vid_lst]
+            self.line_names = [os.path.join(line_lst_prefix, name) for name in line_lst]
+
+            if not split == 'train':
+                mask_lst_prefix = os.path.join(root, name, split+'_all_frames/mask_random')
+                mask_lst = os.listdir(mask_lst_prefix)
+                self.mask_names = [os.path.join(mask_lst_prefix, name) for name in mask_lst]
+
+        self._to_tensors = transforms.Compose([
+            Stack(),
+            ToTorchFormatTensor(),])
+
+        self._to_tensors_minMaxNorm = transforms.Compose([
+            Stack(),
+            ToTorchFormatTensor(), 
+            MinMaxNormalize(),])
+            # SetNonZeroToOne(),])
+
+        mean = [0.485, 0.456, 0.406]  # imagenet
+        std = [0.229, 0.224, 0.225] # imagenet
+        self._to_tensors_stdNorm = transforms.Compose([
+            Stack(),
+            ToTorchFormatTensor(),
+            StandardizeNormalize(mean, std),
+        ])
+
+
+    def __len__(self):
+        return len(self.video_names)
+
+    def __getitem__(self, index):
+        video_name = self.video_names[index]
+        line_name = self.line_names[index]
+        all_frames = [os.path.join(video_name, name) for name in sorted(os.listdir(video_name))]
+        all_lines = [os.path.join(line_name, name) for name in sorted(os.listdir(line_name))]
+        if self.split=="train":
+            all_masks = create_random_shape_with_random_motion(
+                len(all_frames), imageHeight=self.h, imageWidth=self.w)
+        else:
+            mask_name = self.mask_names[index]
+            all_masks = [os.path.join(mask_name, name) for name in sorted(os.listdir(mask_name))]
+
+        ref_index = self.get_ref_index(len(all_frames), self.sample_length)
+        # ref_index = self.get_fix_index(len(all_frames), self.sample_length)
+        # ref_index = self.get_same_index(len(all_frames), self.sample_length)
+        frames = []
+        edges = []
+        lines = []
+        masks = []
+
+        for idx in ref_index:
+            # img = Image.open(all_frames[idx]).convert('RGB')
+            img = Image.open(all_frames[idx]).convert('L')
+            img = img.resize(self.size)
+            frames.append(img)
+            
+            edge = canny(np.array(img), sigma=self.sig).astype(np.uint8)*255
+            edges.append(Image.fromarray(edge).resize(self.size))
+
+            line = Image.open(all_lines[idx]).convert('L')
+            line = line.resize(self.size)
+            lines.append(line)
+
+            if self.split == 'train':
+                masks.append(all_masks[idx])
+            else:
+                mask = Image.open(all_masks[idx])
+                mask = mask.resize(self.size, Image.BILINEAR)
+                mask = np.array(mask.convert('L'))
+                mask = np.array(mask > 127).astype(np.uint8)
+                mask = cv2.dilate(mask, cv2.getStructuringElement(cv2.MORPH_CROSS, (3, 3)), iterations=4)
+                masks.append(Image.fromarray(mask*255))
+            # masks.append(all_masks[idx])
+
+        if self.split == 'train':
+            prob = random.random()
+            frames = GroupRandomHorizontalFlip()(frames, prob)
+            edges = GroupRandomHorizontalFlip()(edges, prob)
+            lines = GroupRandomHorizontalFlip()(lines, prob)
+
+        # To tensors
+        frame_tensors = self._to_tensors(frames)
+        edge_tensors = self._to_tensors(edges)
+        line_tensors = self._to_tensors(lines)
+        mask_tensors = self._to_tensors(masks)
+        meta = {'frames': frame_tensors, 'masks': mask_tensors, 'edges': edge_tensors, 'lines': line_tensors, 
+                'name': video_name.split('/')[-1], 'idxs': [all_frames[idx].split('/')[-1] for idx in ref_index]}
+        return meta
+
+    def get_ref_index(self, length, sample_length):
+        if random.uniform(0, 1) > 0.5:
+            ref_index = random.sample(range(length), sample_length)
+            ref_index.sort()
+        else:
+            pivot = random.randint(0, length-sample_length)
+            ref_index = [pivot+i for i in range(sample_length)]
+        return ref_index
+
+    def get_fix_index(self, length, sample_length):
+        if sample_length == 5:
+            pivot = random.randint(7, length-8)
+            ref_index = [pivot-7, pivot-3, pivot, pivot+3, pivot+7]
+        else:
+            raise NotImplementedError
+        return ref_index
+
+    def get_same_index(self, length, sample_length):
+        pivot = random.randint(0, length-1)
+        ref_index = [pivot for i in range(sample_length)]
+        return ref_index
