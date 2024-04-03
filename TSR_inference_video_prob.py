@@ -7,7 +7,7 @@ import numpy as np
 import torch
 from tqdm import tqdm
 
-from datasets.dataset_TSR import ContinuousEdgeLineDatasetMask_video
+from datasets.dataset_TSR import ContinuousEdgeLineDatasetMask_video, EdgeLineDataset_v2
 from src.models.TSR_model import EdgeLineGPTConfig, EdgeLineGPT256RelBCE_video, EdgeLineGPT256RelBCE_plus, StructGPT256RelBCE_video, EdgeLine_CNN
 from src.utils import set_seed, SampleEdgeLineLogits_video, SampleEdgeLineLogits
 
@@ -49,7 +49,8 @@ if __name__ == '__main__':
     IGPT_model.load_state_dict(checkpoint if opts.ckpt_path.endswith('.pt') else checkpoint['model'])
     IGPT_model.to("cuda")
 
-    test_dataset = ContinuousEdgeLineDatasetMask_video(opts, sample=opts.ref_frame_num, size=(432, 240), split='test', name=opts.dataset_name, root=opts.dataset_root)
+    # test_dataset = ContinuousEdgeLineDatasetMask_video(opts, sample=opts.ref_frame_num, size=(432, 240), split='test', name=opts.dataset_name, root=opts.dataset_root)
+    test_dataset = EdgeLineDataset_v2(opts, sample=opts.ref_frame_num, size=(432, 240), split='test', name=opts.dataset_name, root=opts.dataset_root)
     
 
     for it in tqdm(range(test_dataset.__len__())):
