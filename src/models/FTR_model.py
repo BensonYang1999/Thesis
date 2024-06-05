@@ -3,6 +3,7 @@ import os
 from src.losses.adversarial import NonSaturatingWithR1, NonSaturatingWithR1_video_2D
 from src.losses.feature_matching import masked_l1_loss, feature_matching_loss
 from src.losses.perceptual import ResNetPL, ResNetPL_video
+from src.losses.clip import *
 from src.models.LaMa import *
 from src.models.TSR_model import *
 from src.models.upsample import StructureUpsampling
@@ -14,6 +15,8 @@ def make_optimizer(parameters, kind='adamw', **kwargs):
         optimizer_class = torch.optim.Adam
     elif kind == 'adamw':
         optimizer_class = torch.optim.AdamW
+    elif kind == 'sgd':
+        optimizer_class = torch.optim.SGD
     else:
         raise ValueError(f'Unknown optimizer kind {kind}')
     return optimizer_class(parameters, **kwargs)
@@ -330,8 +333,14 @@ class BaseInpaintingTrainingModule_video(nn.Module):
         self.iteration = 0
         self.name = name
         self.test = test
-        self.gen_weights_path = os.path.join(config.PATH, name + '_gen.pth')
-        self.dis_weights_path = os.path.join(config.PATH, name + '_dis.pth')
+        if test:
+            self.gen_weights_path = os.path.join(config.PATH, name + '_best_gen_HR.pth')
+            self.dis_weights_path = os.path.join(config.PATH, name + '_best_dis_HR.pth')
+            # self.gen_weights_path = os.path.join(config.PATH, name + '_gen.pth')
+            # self.dis_weights_path = os.path.join(config.PATH, name + '_dis.pth')
+        else:
+            self.gen_weights_path = os.path.join(config.PATH, name + '_gen.pth')
+            self.dis_weights_path = os.path.join(config.PATH, name + '_dis.pth')
 
         if config.SFE_structure == "resnet":
             print("Using ResNet as structure encoder")
@@ -351,7 +360,8 @@ class BaseInpaintingTrainingModule_video(nn.Module):
         print("Loading trained transformer...")
         model_config = EdgeLineGPTConfig(embd_pdrop=0.0, resid_pdrop=0.0, n_embd=args.n_embd, block_size=32,
                                      attn_pdrop=0.0, n_layer=args.n_layer, n_head=args.n_head, ref_frame_num=args.ref_frame_num) # video version
-        self.transformer = EdgeLineGPT256RelBCE_video(model_config, args, device=gpu)
+        # self.transformer = EdgeLineGPT256RelBCE_video(model_config, args, device=gpu)
+        self.transformer = EdgeLine_CNN()
         checkpoint = torch.load(config.transformer_ckpt_path, map_location='cpu')
         if config.transformer_ckpt_path.endswith('.pt'): 
             self.transformer.load_state_dict(checkpoint) # load the line/edge inpainted model
@@ -382,6 +392,12 @@ class BaseInpaintingTrainingModule_video(nn.Module):
                 self.loss_resnet_pl = ResNetPL_video(**self.config.losses['resnet_pl'])
             else:
                 self.loss_resnet_pl = None
+            
+            if self.config.losses.get("clip", {"weight": 0})['weight'] > 0:
+                self.loss_clip = clip_loss(**self.config.losses['clip'])
+            else:
+                self.loss_clip = None
+            
             self.gen_optimizer, self.dis_optimizer = self.configure_optimizers()
             self.str_optimizer = torch.optim.Adam(self.str_encoder.parameters(), lr=config.optimizers['generator']['lr'])
         if self.config.AMP:  # use AMP
@@ -405,10 +421,11 @@ class BaseInpaintingTrainingModule_video(nn.Module):
             # self.discriminator = apex.parallel.convert_syncbn_model(self.discriminator)
             # self.generator = apex.parallel.DistributedDataParallel(self.generator)
             # self.discriminator = apex.parallel.DistributedDataParallel(self.discriminator)
-            self.generator = torch.nn.SyncBatchNorm.convert_sync_batchnorm(self.generator)
-            self.discriminator = torch.nn.SyncBatchNorm.convert_sync_batchnorm(self.discriminator)
-            self.generator = torch.nn.parallel.DistributedDataParallel(self.generator)
-            self.discriminator = torch.nn.parallel.DistributedDataParallel(self.discriminator)
+            
+            # self.generator = torch.nn.SyncBatchNorm.convert_sync_batchnorm(self.generator)
+            # self.discriminator = torch.nn.SyncBatchNorm.convert_sync_batchnorm(self.discriminator)
+            self.generator = torch.nn.parallel.DistributedDataParallel(self.generator, find_unused_parameters=True, broadcast_buffers=False)
+            self.discriminator = torch.nn.parallel.DistributedDataParallel(self.discriminator, find_unused_parameters=True, broadcast_buffers=False)
 
         if self.config.optimizers['decay_steps'] is not None and self.config.optimizers['decay_steps'] > 0 and not test:
             self.g_scheduler = torch.optim.lr_scheduler.StepLR(self.gen_optimizer, config.optimizers['decay_steps'],
@@ -463,11 +480,11 @@ class BaseInpaintingTrainingModule_video(nn.Module):
             self.gen_optimizer.load_state_dict(data['optimizer'])
             self.str_optimizer.load_state_dict(data['str_opt'])
             self.iteration = data['iteration']
-            if self.iteration > 0:
-                gen_weights_path = os.path.join(self.config.PATH, self.name + '_best_gen_HR.pth')
-                data = torch.load(gen_weights_path, map_location='cpu')
-                self.best = data['best_vfid']
-                print('Loading best vfid...')
+            # if self.iteration > 0:
+            #     gen_weights_path = os.path.join(self.config.PATH, self.name + '_best_gen_HR.pth')
+            #     data = torch.load(gen_weights_path, map_location='cpu')
+            #     self.best = data['best_vfid']
+            #     print('Loading best vfid...')
 
         else:
             print('Warnning: There is no previous optimizer found. An initialized optimizer will be used.')
@@ -780,20 +797,23 @@ class DefaultInpaintingTrainingModule_video(BaseInpaintingTrainingModule_video):
 
     def process(self, batch):
         self.iteration += 1 # iteration for optimizer
-        self.discriminator.zero_grad() # clear gradient for discriminator
+        
         # discriminator loss
-        # print batch shape
+        self.discriminator.zero_grad() # clear gradient for discriminator
         dis_loss, batch, dis_metric = self.discriminator_loss(batch) #  [B, T, 3, H, W] for video compute the discriminator loss
+
+        # discriminator update
         self.dis_optimizer.step() # update discriminator
         if self.d_scheduler is not None: 
             self.d_scheduler.step() # update discriminator scheduler (learning rate decay)
-
+        
         # generator loss
         self.generator.zero_grad() # clear gradient for generator
         self.str_optimizer.zero_grad() # clear gradient for structure encoder
         # generator loss
         gen_loss, gen_metric = self.generator_loss(batch) # compute the generator loss
 
+        # generator update
         if self.config.AMP:  # use AMP
             self.scaler.step(self.gen_optimizer) #  update generator with scaler
             self.scaler.update()
@@ -849,13 +869,19 @@ class DefaultInpaintingTrainingModule_video(BaseInpaintingTrainingModule_video):
             mask_for_fm = supervised_mask if need_mask_in_fm else None
             fm_value = feature_matching_loss(discr_fake_features, discr_real_features,
                                             mask=mask_for_fm) * self.config.losses['feature_matching']['weight']
-            total_loss += fm_value
+            total_loss = total_loss + fm_value
             metrics[f'gen_fm'] = fm_value.item()
 
         if self.loss_resnet_pl is not None:
             resnet_pl_value = self.loss_resnet_pl(predicted_video, frames)
-            total_loss += resnet_pl_value
+            total_loss = total_loss + resnet_pl_value
             metrics[f'gen_resnet_pl'] = resnet_pl_value.item()
+
+        # clip
+        if self.loss_clip is not None:
+            clip_value = self.loss_clip(predicted_video, frames)
+            total_loss = total_loss + clip_value
+            metrics[f'gen_clip'] = clip_value.item()
 
         if self.config.AMP:
             self.scaler.scale(total_loss).backward()
@@ -882,6 +908,7 @@ class DefaultInpaintingTrainingModule_video(BaseInpaintingTrainingModule_video):
         fake_loss = self.adversarial_loss.discriminator_fake_loss(discr_fake_pred=discr_fake_pred, mask=batch['masks'])
         fake_loss.backward()
         total_loss = fake_loss + real_loss
+        # total_loss.backward(retain_graph=True)
         metrics = {}
         metrics['dis_real_loss'] = dis_real_loss.mean().item()
         metrics['dis_fake_loss'] = fake_loss.item()
