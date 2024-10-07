@@ -6,11 +6,11 @@ import torch
 import torch.distributed as dist
 import torch.multiprocessing as mp
 from datasets.dataset_TSR import ContinuousEdgeLineDatasetMask, ContinuousEdgeLineDatasetMaskFinetune
-from datasets.dataset_TSR import ContinuousEdgeLineDatasetMask_video, FastEdgeLineDataset
+from datasets.dataset_TSR import ContinuousEdgeLineDatasetMask_video, EdgeLineDataset_v2
 from src.TSR_trainer import TrainerConfig, TrainerForContinuousEdgeLine, TrainerForEdgeLineFinetune
 from src.TSR_trainer import TrainerForContinuousEdgeLine_video, TrainerForContinuousEdgeLine_plus, TrainerForContinuousStruct_video
 from src.models.TSR_model import EdgeLineGPT256RelBCE, EdgeLineGPTConfig
-from src.models.TSR_model import EdgeLineGPT256RelBCE_video, EdgeLineGPT256RelBCE_plus, StructGPT256RelBCE_video, EdgeLine_CNN
+from src.models.TSR_model import EdgeLineGPT256RelBCE_video, StructGPT256RelBCE_video, EdgeLine_CNN
 from src.utils import set_seed
 
 # torch.cuda.set_per_process_memory_fraction(0.8, 1)
@@ -23,7 +23,6 @@ def main_worker(rank, opts):
     gpu = torch.device("cuda", rank)
     torch.cuda.set_device(rank)
     if opts.DDP:
-        import datetime
         dist.init_process_group(backend='nccl', init_method='env://', 
                                 world_size=opts.world_size, rank=rank)
     torch.backends.cudnn.benchmark = True
@@ -43,7 +42,6 @@ def main_worker(rank, opts):
     model_config = EdgeLineGPTConfig(embd_pdrop=0.0, resid_pdrop=0.0, n_embd=opts.n_embd, block_size=32,
                                      attn_pdrop=0.0, n_layer=opts.n_layer, n_head=opts.n_head, ref_frame_num=opts.ref_frame_num)
     if opts.exp:
-        # IGPT_model = EdgeLineGPT256RelBCE_plus(model_config)
         IGPT_model = StructGPT256RelBCE_video(model_config, opts, device=gpu)
     elif opts.cnn:
         IGPT_model = EdgeLine_CNN()
@@ -52,7 +50,7 @@ def main_worker(rank, opts):
 
     if opts.DDP:
         IGPT_model = torch.nn.SyncBatchNorm.convert_sync_batchnorm(IGPT_model.cuda())
-        IGPT_model = torch.nn.parallel.DistributedDataParallel(IGPT_model, device_ids=[rank], output_device=rank)
+        IGPT_model = torch.nn.parallel.DistributedDataParallel(IGPT_model, device_ids=[rank], output_device=rank, find_unused_parameters=True)
 
     if rank == 0:
         num_params = sum(p.numel() for p in IGPT_model.parameters() if p.requires_grad)
@@ -60,10 +58,10 @@ def main_worker(rank, opts):
 
     # Define the dataset
     if not opts.MaP:
-        train_dataset = ContinuousEdgeLineDatasetMask_video(opts, sample=opts.ref_frame_num, size=(opts.image_w,opts.image_h), split='train', name=opts.dataset_name, root=opts.dataset_root)
-        test_dataset = ContinuousEdgeLineDatasetMask_video(opts, sample=opts.ref_frame_num, size=(opts.image_w,opts.image_h), split='valid', name=opts.dataset_name, root=opts.dataset_root)
-        # train_dataset = FastEdgeLineDataset(opts, sample=opts.ref_frame_num, size=(opts.image_w,opts.image_h), split='train', name=opts.dataset_name, root=opts.dataset_root)
-        # test_dataset = FastEdgeLineDataset(opts, sample=opts.ref_frame_num, size=(opts.image_w,opts.image_h), split='valid', name=opts.dataset_name, root=opts.dataset_root)
+        # train_dataset = ContinuousEdgeLineDatasetMask_video(opts, sample=opts.ref_frame_num, size=(opts.image_w,opts.image_h), split='train', name=opts.dataset_name, root=opts.dataset_root)
+        # test_dataset = ContinuousEdgeLineDatasetMask_video(opts, sample=opts.ref_frame_num, size=(opts.image_w,opts.image_h), split='valid', name=opts.dataset_name, root=opts.dataset_root)
+        train_dataset = EdgeLineDataset_v2(opts, sample=opts.ref_frame_num, size=(opts.image_w,opts.image_h), split='train', name=opts.dataset_name, root=opts.dataset_root)
+        test_dataset = EdgeLineDataset_v2(opts, sample=opts.ref_frame_num, size=(opts.image_w,opts.image_h), split='valid', name=opts.dataset_name, root=opts.dataset_root)
 
     else:  # TODO
         train_dataset = ContinuousEdgeLineDatasetMaskFinetune(opts.data_path, mask_path=opts.mask_path, is_train=True,

@@ -8,7 +8,7 @@ import torch
 from tqdm import tqdm
 
 from datasets.dataset_TSR import ContinuousEdgeLineDatasetMask_video
-from src.models.TSR_model import EdgeLineGPTConfig, EdgeLineGPT256RelBCE_video, EdgeLineGPT256RelBCE_plus, StructGPT256RelBCE_video
+from src.models.TSR_model import EdgeLineGPTConfig, EdgeLineGPT256RelBCE_video, StructGPT256RelBCE_video
 from src.utils import set_seed, SampleEdgeLineLogits_video, SampleEdgeLineLogits, SampleStructLogits_video
 
 if __name__ == '__main__':

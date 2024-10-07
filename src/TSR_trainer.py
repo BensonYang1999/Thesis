@@ -682,7 +682,7 @@ class TrainerForContinuousEdgeLine_video:
                         output = np.concatenate([original_img, current_img, output], axis=1)
                         save_path = self.config.ckpt_path + '/samples'
                         os.makedirs(save_path, exist_ok=True)
-                        cv2.imwrite(save_path + '/' + str(self.iterations) + '.jpg', output[:, :, ::-1])
+                        cv2.imwrite(save_path + '/' + str(self.iterations).zfill(5) + '.jpg', output[:, :, ::-1])
                         torch.cuda.empty_cache()
 
                         '''
@@ -712,18 +712,12 @@ class TrainerForContinuousEdgeLine_video:
                                             save_name='latest')
                         '''
 
-                    writer.add_scalar('train_loss', loss.item(), self.iterations) # tensorboard
-                    writer.add_scalar('train_edge_hole_loss', edge_hole_loss.item(), self.iterations)
-                    writer.add_scalar('train_edge_valid_loss', edge_valid_loss.item(), self.iterations)
-                    writer.add_scalar('train_line_hole_loss', line_hole_loss.item(), self.iterations)
-                    writer.add_scalar('train_line_valid_loss', line_valid_loss.item(), self.iterations)
+                    writer.add_scalar('Loss/total_loss', loss.item(), self.iterations) # tensorboard
+                    writer.add_scalar('Loss/edge_hole_loss', edge_hole_loss.item(), self.iterations)
+                    writer.add_scalar('Loss/edge_valid_loss', edge_valid_loss.item(), self.iterations)
+                    writer.add_scalar('Loss/line_hole_loss', line_hole_loss.item(), self.iterations)
+                    writer.add_scalar('Loss/line_valid_loss', line_valid_loss.item(), self.iterations)
                     writer.add_scalar('learning_rate', lr, self.iterations) # tensorboard
-                    writer.add_scalar('edge_precision', edge_P, self.iterations)
-                    writer.add_scalar('edge_recall', edge_R, self.iterations)
-                    writer.add_scalar('edge_F1', edge_F1, self.iterations)
-                    writer.add_scalar('line_precision', line_P, self.iterations)
-                    writer.add_scalar('line_recall', line_R, self.iterations)
-                    writer.add_scalar('line_F1', line_F1, self.iterations)
                 
             # print epoch average loss
             if self.global_rank == 0:
@@ -737,6 +731,12 @@ class TrainerForContinuousEdgeLine_video:
                             "line_F1: %f, ave_F1: %f time for 2k iter: %d seconds" %
                             (epoch+1, edge_P, edge_R, edge_F1, line_P, line_R, line_F1, average_F1,
                             time.time() - epoch_start))
+            writer.add_scalar('Evaluation/edge_precision', edge_P, self.iterations)
+            writer.add_scalar('Evaluation/edge_recall', edge_R, self.iterations)
+            writer.add_scalar('Evaluation/edge_F1', edge_F1, self.iterations)
+            writer.add_scalar('Evaluation/line_precision', line_P, self.iterations)
+            writer.add_scalar('Evaluation/line_recall', line_R, self.iterations)
+            writer.add_scalar('Evaluation/line_F1', line_F1, self.iterations)
 
             # supports early stopping based on the test loss, or just save always if no test set is provided
             good_model = self.test_dataset is None or average_F1 >= bestAverageF1
