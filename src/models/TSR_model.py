@@ -626,10 +626,10 @@ class EdgeLine_CNN(nn.Module):
         self.resnet = nn.Sequential(*resnet_block)
 
         # transformer
-        self.patch_embed = PatchEmbedding(256, 16, 768, (60, 108))
-        encoder_layer = nn.TransformerEncoderLayer(d_model=768, nhead=4)
-        self.transformer = nn.TransformerEncoder(encoder_layer, num_layers=8)
-        self.patch_decoder = PatchDecoder(256, 16, 768, (60, 108))
+        # self.patch_embed = PatchEmbedding(256, 16, 768, (60, 108))
+        # encoder_layer = nn.TransformerEncoderLayer(d_model=768, nhead=4)
+        # self.transformer = nn.TransformerEncoder(encoder_layer, num_layers=8)
+        # self.patch_decoder = PatchDecoder(256, 16, 768, (60, 108))
 
         # 3D transposed convolutional layers (Decoder)
         # self.convt1 = nn.ConvTranspose3d(256, 128, kernel_size=(3, 4, 4))
@@ -747,6 +747,20 @@ class EdgeLine_CNN(nn.Module):
             loss_line_valid = loss_line * (1-masks_)
 
 
+            # MSE loss
+            # criterion = nn.MSELoss(reduction='none')
+            # loss_edge = criterion(edge_sig, edge_targets)
+            # loss_line = criterion(line_sig, line_targets)
+
+            # loss = (loss_edge + loss_line) * masks_
+            # loss = torch.mean(loss)
+            # total_loss = loss
+
+            # loss_edge_hole += loss_edge * masks_
+            # loss_edge_valid += loss_edge * (1-masks_)
+            # loss_line_hole += loss_line * masks_
+            # loss_line_valid += loss_line * (1-masks_)
+        
         # edge, line = edge.view(x_shape[0], x_shape[2], 1, x_shape[3], x_shape[4]), line.view(x_shape[0], x_shape[2], 1, x_shape[3], x_shape[4])
         # edge, line = self.act_last(edge), self.act_last(line)  # sigmoid activate
 
@@ -754,7 +768,7 @@ class EdgeLine_CNN(nn.Module):
         # return self.act_last(edge), self.act_last(line), loss, loss_detail
         return self.act_last(edge), self.act_last(line), total_loss, loss_detail
     
-    def forward_with_logits(self, img_idx, edge_idx, line_idx, masks=None):  # for inference, no loss computing
+    def forward_with_logits(self, img_idx, edge_idx, line_idx, masks):  # for inference, no loss computing
         img_idx = img_idx * (1 - masks)
         edge_idx = edge_idx * (1 - masks)
         line_idx = line_idx * (1 - masks)

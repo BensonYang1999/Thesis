@@ -4,6 +4,7 @@ from src.losses.adversarial import NonSaturatingWithR1, NonSaturatingWithR1_vide
 from src.losses.feature_matching import masked_l1_loss, feature_matching_loss
 from src.losses.perceptual import ResNetPL, ResNetPL_video
 from src.losses.clip import *
+from src.losses.smoothness import *
 from src.models.LaMa import *
 from src.models.TSR_model import *
 from src.models.upsample import StructureUpsampling
@@ -334,10 +335,12 @@ class BaseInpaintingTrainingModule_video(nn.Module):
         self.name = name
         self.test = test
         if test:
-            self.gen_weights_path = os.path.join(config.PATH, name + '_best_gen_HR.pth')
-            self.dis_weights_path = os.path.join(config.PATH, name + '_best_dis_HR.pth')
-            # self.gen_weights_path = os.path.join(config.PATH, name + '_gen.pth')
-            # self.dis_weights_path = os.path.join(config.PATH, name + '_dis.pth')
+            if args.useGT_LE:
+                self.gen_weights_path = os.path.join(config.PATH, name + '_best_gen_HR.pth')
+                self.dis_weights_path = os.path.join(config.PATH, name + '_best_dis_HR.pth')
+            else:
+                self.gen_weights_path = os.path.join(config.PATH, name + '_gen.pth')
+                self.dis_weights_path = os.path.join(config.PATH, name + '_dis.pth')
         else:
             self.gen_weights_path = os.path.join(config.PATH, name + '_gen.pth')
             self.dis_weights_path = os.path.join(config.PATH, name + '_dis.pth')
@@ -358,8 +361,8 @@ class BaseInpaintingTrainingModule_video(nn.Module):
         self.structure_upsample.load_state_dict(data['model'])
         self.structure_upsample = self.structure_upsample.cuda(gpu).eval()
         print("Loading trained transformer...")
-        model_config = EdgeLineGPTConfig(embd_pdrop=0.0, resid_pdrop=0.0, n_embd=args.n_embd, block_size=32,
-                                     attn_pdrop=0.0, n_layer=args.n_layer, n_head=args.n_head, ref_frame_num=args.ref_frame_num) # video version
+        # model_config = EdgeLineGPTConfig(embd_pdrop=0.0, resid_pdrop=0.0, n_embd=args.n_embd, block_size=32,
+        #                              attn_pdrop=0.0, n_layer=args.n_layer, n_head=args.n_head, ref_frame_num=args.ref_frame_num) # video version
         # self.transformer = EdgeLineGPT256RelBCE_video(model_config, args, device=gpu)
         self.transformer = EdgeLine_CNN()
         checkpoint = torch.load(config.transformer_ckpt_path, map_location='cpu')
@@ -368,7 +371,7 @@ class BaseInpaintingTrainingModule_video(nn.Module):
         else:
             self.transformer.load_state_dict(checkpoint['model'])
         self.transformer.cuda(gpu).eval()  # eval mode of line/edge inpainted model
-        self.transformer.half() # half precision
+        # self.transformer.half() # half precision  # 9/14 disabled half precision
 
         if not test:
             # self.discriminator = NLayerDiscriminator_video(**self.config.discriminator).cuda(gpu) 
@@ -397,6 +400,11 @@ class BaseInpaintingTrainingModule_video(nn.Module):
                 self.loss_clip = clip_loss(**self.config.losses['clip'])
             else:
                 self.loss_clip = None
+            
+            if self.config.losses.get("smooth", {"weight": 0})['weight'] > 0:
+                self.loss_smooth = smooth_loss(**self.config.losses['smooth'])
+            else:
+                self.loss_smooth = None
             
             self.gen_optimizer, self.dis_optimizer = self.configure_optimizers()
             self.str_optimizer = torch.optim.Adam(self.str_encoder.parameters(), lr=config.optimizers['generator']['lr'])
@@ -445,6 +453,9 @@ class BaseInpaintingTrainingModule_video(nn.Module):
             self.g_scheduler = None
             self.d_scheduler = None
             self.str_scheduler = None
+        
+        # print network parameter number
+        self.print_network()
 
     def load_rezero(self):
         if os.path.exists(self.config.gen_weights_path0):
@@ -499,7 +510,7 @@ class BaseInpaintingTrainingModule_video(nn.Module):
             print('Warnning: There is no previous optimizer found. An initialized optimizer will be used.')
 
     def save(self):
-        print('\nsaving %s...\n' % self.name)
+        print('saving %s...' % self.name)
         raw_model = self.generator.module if hasattr(self.generator, "module") else self.generator
         raw_encoder = self.str_encoder.module if hasattr(self.str_encoder, "module") else self.str_encoder
         torch.save({
@@ -521,6 +532,17 @@ class BaseInpaintingTrainingModule_video(nn.Module):
             make_optimizer(self.generator.parameters(), **self.config.optimizers['generator']),
             make_optimizer(discriminator_params, **self.config.optimizers['discriminator'])
         ]
+
+    def print_network(self):
+        if isinstance(self, list):
+            self = self[0]
+        num_params = 0
+        for param in self.parameters():
+            num_params += param.numel()
+        print(
+            'Network [%s] was created. Total number of parameters: %.1f million. '
+            'To see the architecture, do print(network).' %
+            (type(self).__name__, num_params / 1000000))
 
 
 class LaMaInpaintingTrainingModule(LaMaBaseInpaintingTrainingModule):
@@ -879,9 +901,22 @@ class DefaultInpaintingTrainingModule_video(BaseInpaintingTrainingModule_video):
 
         # clip
         if self.loss_clip is not None:
-            clip_value = self.loss_clip(predicted_video, frames)
-            total_loss = total_loss + clip_value
-            metrics[f'gen_clip'] = clip_value.item()
+            clip_value, consistency_value, traj_value = self.loss_clip(predicted_video, frames)
+            if clip_value is not None:
+                total_loss = total_loss + clip_value
+                metrics[f'gen_clip'] = clip_value.item()
+            if consistency_value is not None:
+                total_loss = total_loss + consistency_value
+                metrics[f'gen_clip_consistency'] = consistency_value.item()
+            if traj_value is not None:
+                total_loss = total_loss + traj_value
+                metrics[f'gen_clip_traj'] = traj_value.item()
+
+        # image smoothness loss
+        if self.loss_smooth is not None:
+            smooth_value = self.loss_smooth(predicted_video)
+            total_loss = total_loss + smooth_value
+            metrics[f'gen_smooth'] = smooth_value.item()
 
         if self.config.AMP:
             self.scaler.scale(total_loss).backward()

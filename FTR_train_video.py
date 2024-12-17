@@ -10,6 +10,7 @@ import torch.distributed as dist
 import torch.multiprocessing as mp
 import signal
 import sys
+import logging
 
 from src.FTR_trainer import ZITS_video, LaMa
 from src.config import Config
@@ -21,63 +22,71 @@ def signal_handler(sig, frame):
     sys.exit(0)
 
 def main_worker(gpu, args):
-    try:
-        rank = args.node_rank * args.gpus + gpu
-        torch.cuda.set_device(gpu)
+    rank = args.node_rank * args.gpus + gpu
+    torch.cuda.set_device(gpu)
 
-        if args.DDP:
-            dist.init_process_group(backend='nccl',
-                                    init_method='env://',
-                                    world_size=args.world_size,
-                                    rank=rank,
-                                    group_name='mtorch')
+    if args.DDP:
+        dist.init_process_group(backend='nccl',
+                                init_method='env://',
+                                world_size=args.world_size,
+                                rank=rank,
+                                group_name='mtorch')
+    mp.set_sharing_strategy('file_system')
 
-        # load config file
-        config = Config(args.config_path, args.model_name)
-        config.MODE = 1
-        config.nodes = args.nodes
-        config.gpus = args.gpus
-        config.GPU_ids = args.GPU_ids
-        config.DDP = args.DDP
-        if config.DDP:
-            config.world_size = args.world_size
-        else:
-            config.world_size = 1
+    logger = logging.getLogger(__name__)
+    logger.setLevel(logging.DEBUG)
+    sh = logging.StreamHandler(stream=sys.stdout)
+    logger.addHandler(sh)
+    fh = logging.FileHandler(os.path.join(args.path, 'log.txt'))
+    logger.addHandler(fh)
+    logger.propagate = False
 
-        torch.backends.cudnn.benchmark = True  # cudnn auto-tuner
-        cv2.setNumThreads(0)
+    # load config file
+    config = Config(args.config_path, args.model_name)
+    config.MODE = 1
+    config.nodes = args.nodes
+    config.gpus = args.gpus
+    config.GPU_ids = args.GPU_ids
+    config.DDP = args.DDP
+    if config.DDP:
+        config.world_size = args.world_size
+    else:
+        config.world_size = 1
+    
+    # initialize random seed
+    torch.manual_seed(config.SEED)
+    torch.cuda.manual_seed_all(config.SEED)
+    np.random.seed(config.SEED)
+    random.seed(config.SEED)
 
-        # initialize random seed
-        torch.manual_seed(config.SEED)
-        torch.cuda.manual_seed_all(config.SEED)
-        np.random.seed(config.SEED)
-        random.seed(config.SEED)
+    torch.backends.cudnn.benchmark = True  # cudnn auto-tuner
+    cv2.setNumThreads(0)
 
-        # build the model and initialize
-        if args.lama:
-            model = LaMa(config, gpu, rank)
-        else:
-            model = ZITS_video(args, config, gpu, rank)
+    # build the model and initialize
+    if args.lama:
+        model = LaMa(config, gpu, rank)
+    else:
+        model = ZITS_video(args, config, gpu, rank, logger=logger)
 
-        # model training
-        if rank == 0:
-            config.print()
-            print('\nstart training...\n')
-        model.train()
-    except Exception as e:
-        print('\nException in main_worker:', e)
-        e_type, e_object, e_traceback = sys.exc_info()
-        e_filename = os.path.split(
-            e_traceback.tb_frame.f_code.co_filename)[1]
-        e_message = str(e)
-        e_line_number = e_traceback.tb_lineno
+    # model training
+    if rank == 0:
+        # config.print()
+        print('\nstart training...\n')
+    model.train()
+    # except Exception as e:
+    #     print('\nException in main_worker:', e)
+    #     e_type, e_object, e_traceback = sys.exc_info()
+    #     e_filename = os.path.split(
+    #         e_traceback.tb_frame.f_code.co_filename)[1]
+    #     e_message = str(e)
+    #     e_line_number = e_traceback.tb_lineno
 
-        print(f'exception type: {e_type}')
-        print(f'exception filename: {e_filename}')
-        print(f'exception line number: {e_line_number}')
-        print(f'exception message: {e_message}')
-    finally:
-        cleanup()
+    #     print(f'exception type: {e_type}')
+    #     print(f'exception filename: {e_filename}')
+    #     print(f'exception line number: {e_line_number}')
+    #     print(f'exception message: {e_message}')
+    # finally:
+    #     cleanup()
 
 def cleanup():
     if dist.is_initialized():
@@ -93,8 +102,8 @@ if __name__ == "__main__":
     parser.add_argument('--config_file', type=str, default='./config_list/config_ZITS_video.yml',
                         help='The config file of each experiment ')
     parser.add_argument('--nodes', type=int, default=1, help='how many machines')
-    parser.add_argument('--gpus', type=int, default=1, help='how many GPUs in one node')
-    parser.add_argument('--GPU_ids', type=str, default='0')
+    parser.add_argument('--gpus', type=int, default=2, help='how many GPUs in one node')
+    parser.add_argument('--GPU_ids', type=str, default='0,1')
     parser.add_argument('--node_rank', type=int, default=0, help='the id of this machine')
     parser.add_argument('--DDP', action='store_true', help='DDP')
     parser.add_argument('--lama', action='store_true', help='train the lama first')
