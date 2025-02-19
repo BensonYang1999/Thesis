@@ -1,12 +1,12 @@
-# SERVI: Structure Enhanced Regional Video Inpainting (Paper)
-by [MuXi Chen](https://github.com/ChenMuHsi), YuChee Tseng, YenAnn Chen
+# Enhancing Regional Video Inpainting with Structural Guidance
+by [ChunWei Yang](https://github.com/BensonYang1999), YuChee Tseng, YenAnn Chen
 
 > [!IMPORTANT]  
-> This work is referencing to [ZITS](https://github.com/DQiaole/ZITS_inpainting) and [FuseFormer](https://github.com/ruiliu-ai/FuseFormer)
+> This work is referencing to [SERVI](https://github.com/muxi1998/SERVI) and [ZITS](https://github.com/DQiaole/ZITS_inpainting)
 
-![system architecture](./imgs/sys_arch.jpg)
+![system architecture](./imgs/sys_arch.png)
 
-### TODO:
+<!-- ### TODO:
 - [ ] Overall Workflow figure
 - [ ] Data preparing workflow figure
 - [ ] TSR training code re-organized
@@ -14,7 +14,7 @@ by [MuXi Chen](https://github.com/ChenMuHsi), YuChee Tseng, YenAnn Chen
 - [ ] Bug of VFID score shown during training process
 - [ ] Wvaluation process 
 - [ ] Future work list
-- [ ] Fix bug of compute summary
+- [ ] Fix bug of compute summary -->
 
 
 ## Dataset
@@ -24,54 +24,55 @@ by [MuXi Chen](https://github.com/ChenMuHsi), YuChee Tseng, YenAnn Chen
 ### 2. DAVIS
 [Official Website](https://davischallenge.org)
 
-## Pretrain model
+<!-- ## Pretrain model
 The downloaded files should be organized as a folder under ./ckpt
 
-OneDrive Link: [FTR_model (1024_SERVI)](https://1drv.ms/f/s!AuoSU7-7YWU1hbAOOs1G8sgpSJTpSQ?e=v6djZ7),  [TSR_model (0521_YoutubeVOS)](https://1drv.ms/f/s!AuoSU7-7YWU1hbAVZVR4FcLBkk7sBA?e=0qjpkv)
+OneDrive Link: [FTR_model (1024_SERVI)](https://1drv.ms/f/s!AuoSU7-7YWU1hbAOOs1G8sgpSJTpSQ?e=v6djZ7),  [TSR_model (0521_YoutubeVOS)](https://1drv.ms/f/s!AuoSU7-7YWU1hbAVZVR4FcLBkk7sBA?e=0qjpkv) -->
 
 ## Train
-### TSR model
+### SR model
 * Template
     ```
-    python3 TSR_train_video.py --name <model_name> --dataset_root ./datasets --dataset_name <YouTubeVOS/DAVIS> --batch_size 4 --train_epoch 100 --loss_hole_valid_weight 0.8 0.2 --GPU_ids 0 --loss_choice bce
+    python3 TSR_train_video.py --name <model_name> --dataset_root ./datasets --dataset_name <YouTubeVOS/DAVIS> --batch_size 64 --train_epoch 500 --gpus 2 --DDP --cnn
     ```
 * Example:
     ```
-    python3 TSR_train_video.py --name 1019_ZITS_video_YouTubeVOS_256_256_08hole_02valid_1edge_1line_minMaxNorm_oldEdge_bs2_bce   --dataset_root ./datasets --dataset_name YouTubeVOS --batch_size 4 --train_epoch 100 --loss_hole_valid_weight 0.8 0.2 --GPU_ids 0 --loss_choice bce
+    python TSR_train_video.py --name 0423_TSR_gray_cnn_seqidx --batch_size 64 --gpus 2 --train_epoch 500 --DDP --cnn
     ```
 
 ### FTR model
 * Template
     ```
-    python3 FTR_train_video.py --model_name <model_name> --DDP
+    python3 FTR_train_video.py --model_name <model_name>
     ```
 * Example:
     ```
-    python3 FTR_train_video.py --model_name 1024_SERVI_finetune0926_l1HoleWeight --DDPe
+    python3 FTR_train_video.py --model_name 1011_FTR
     ```
 
 ## Inference
 
-### TSR model
+### SR model
 * Template
     ```
-    python3 TSR_inference_video.py --GPU_ids 0 --ckpt_path <ckpt_dir> --dataset_root ./ --dataset_name <data_foler_name> --iterations 1 --save_url <save_folder>
+    python3 TSR_inference_video.py --cnn --ckpt_path <ckpt_dir> --dataset_root ./ --dataset_name <data_foler_name> --save_url <save_folder>
     ```
 * Example:
     ```
-    python3 TSR_inference_video.py --GPU_ids 0 --ckpt_path ./ckpt/0521_ZITS_video_YouTubeVOS_08hole_02valid_1edge_1line_minMaxNorm_oldEdge_bs2_bce/best.pth --dataset_root ./ --dataset_name 1002_pic --save_url 1002_pic
+    python TSR_inference_video_prob.py --cnn --ckpt ckpt/0423_TSR_gray_cnn_seqidx/best_clean.pth --save_url 0423_TSR_gray_cnn_seqidx
     ```
 
 ### FTR model
 * Template
     ```
-    python3 FTR_inference_video.py --path <ckpt_folder> --input <data_folder_name> --output <save_folder>
+    python3 FTR_inference_video.py --path <ckpt_folder> --input <data_folder_name>
     ```
 
 * Example:
     ```
-    python3 FTR_inference_video.py --path ckpt/1024_SERVI_finetune0926_l1HoleWeight --input davis --output DAVIS_all
+    python FTR_inference_video.py --path ckpt/1011_FTR
     ```
+
 > [!NOTE]  
 > The testing data reading procedure is wrote in src/utils.py with the function get_frame_mask_edge_line_list (It's Still Ugly)
 
@@ -82,10 +83,22 @@ OneDrive Link: [FTR_model (1024_SERVI)](https://1drv.ms/f/s!AuoSU7-7YWU1hbAOOs1G
 Evaluate the metrics (PSNR/SSIM/LPIPS/VFID/VIF) between inpainted video and GT video
 * Template
     ```
-    python3 compute_score_summarize.py --input_dir <inpainting_result_folder>
+    python3 cal_scores.py --path <inpainting_result_folder> [--mask]
     ```
 
 * Example:
     ```
-    python3 compute_score_summarize.py --input_dir ./results/0819_ZITS_video_YoutubeVOS_max100k_mix91k_turn94k_prev_and_fixModelForward749_fixEvalLineEdge_fixMaskEdgeLine/2023-08-20_edge_75percent
+    cd evaluation
+    python cal_scores.py --path /<root_path>/results/1011_FTR/youtubevos
+    ```
+
+Evaluate the Laplacian Variance (sharpness) of inpainted video
+* Template
+    ```
+    python3 cal_blur.py --path <inpainting_result_folder> [--mask]
+    ```
+* Example:
+    ```
+    cd evaluation
+    python cal_blur.py --path /<root_path>/results/1011_FTR/youtubevos
     ```

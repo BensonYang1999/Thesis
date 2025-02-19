@@ -3,12 +3,14 @@ import logging
 import os
 import sys
 import torch
+import torch.distributed as dist
+import torch.multiprocessing as mp
 from datasets.dataset_TSR import ContinuousEdgeLineDatasetMask, ContinuousEdgeLineDatasetMaskFinetune
-from datasets.dataset_TSR import ContinuousEdgeLineDatasetMask_video
+from datasets.dataset_TSR import ContinuousEdgeLineDatasetMask_video, EdgeLineDataset_v2
 from src.TSR_trainer import TrainerConfig, TrainerForContinuousEdgeLine, TrainerForEdgeLineFinetune
-from src.TSR_trainer import TrainerForContinuousEdgeLine_video, TrainerForContinuousEdgeLine_plus
+from src.TSR_trainer import TrainerForContinuousEdgeLine_video, TrainerForContinuousEdgeLine_plus, TrainerForContinuousStruct_video
 from src.models.TSR_model import EdgeLineGPT256RelBCE, EdgeLineGPTConfig
-from src.models.TSR_model import EdgeLineGPT256RelBCE_video, EdgeLineGPT256RelBCE_plus
+from src.models.TSR_model import EdgeLineGPT256RelBCE_video, StructGPT256RelBCE_video, EdgeLine_CNN
 from src.utils import set_seed
 
 # torch.cuda.set_per_process_memory_fraction(0.8, 1)
@@ -17,8 +19,13 @@ os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "max_split_size_mb:1024"
 
 def main_worker(rank, opts):
     set_seed(42)
-    gpu = torch.device("cuda")
-
+    # gpu = torch.device("cuda")
+    gpu = torch.device("cuda", rank)
+    torch.cuda.set_device(rank)
+    if opts.DDP:
+        dist.init_process_group(backend='nccl', init_method='env://', 
+                                world_size=opts.world_size, rank=rank)
+    torch.backends.cudnn.benchmark = True
     if rank == 0:
         os.makedirs(os.path.dirname(opts.ckpt_path), exist_ok=True)
 
@@ -34,15 +41,27 @@ def main_worker(rank, opts):
     # Define the model
     model_config = EdgeLineGPTConfig(embd_pdrop=0.0, resid_pdrop=0.0, n_embd=opts.n_embd, block_size=32,
                                      attn_pdrop=0.0, n_layer=opts.n_layer, n_head=opts.n_head, ref_frame_num=opts.ref_frame_num)
-    if not opts.exp:
-        IGPT_model = EdgeLineGPT256RelBCE_video(model_config, opts, device=gpu)
+    if opts.exp:
+        IGPT_model = StructGPT256RelBCE_video(model_config, opts, device=gpu)
+    elif opts.cnn:
+        IGPT_model = EdgeLine_CNN()
     else:
-        IGPT_model = EdgeLineGPT256RelBCE_plus(model_config)
+        IGPT_model = EdgeLineGPT256RelBCE_video(model_config, opts, device=gpu)
+
+    if opts.DDP:
+        IGPT_model = torch.nn.SyncBatchNorm.convert_sync_batchnorm(IGPT_model.cuda())
+        IGPT_model = torch.nn.parallel.DistributedDataParallel(IGPT_model, device_ids=[rank], output_device=rank, find_unused_parameters=True)
+
+    if rank == 0:
+        num_params = sum(p.numel() for p in IGPT_model.parameters() if p.requires_grad)
+        print('Number of parameters: %d' % num_params)
 
     # Define the dataset
     if not opts.MaP:
-        train_dataset = ContinuousEdgeLineDatasetMask_video(opts, sample=opts.ref_frame_num, size=(opts.image_w,opts.image_h), split='train', name=opts.dataset_name, root=opts.dataset_root)
-        test_dataset = ContinuousEdgeLineDatasetMask_video(opts, sample=opts.ref_frame_num, size=(opts.image_w,opts.image_h), split='valid', name=opts.dataset_name, root=opts.dataset_root)
+        # train_dataset = ContinuousEdgeLineDatasetMask_video(opts, sample=opts.ref_frame_num, size=(opts.image_w,opts.image_h), split='train', name=opts.dataset_name, root=opts.dataset_root)
+        # test_dataset = ContinuousEdgeLineDatasetMask_video(opts, sample=opts.ref_frame_num, size=(opts.image_w,opts.image_h), split='valid', name=opts.dataset_name, root=opts.dataset_root)
+        train_dataset = EdgeLineDataset_v2(opts, sample=opts.ref_frame_num, size=(opts.image_w,opts.image_h), split='train', name=opts.dataset_name, root=opts.dataset_root)
+        test_dataset = EdgeLineDataset_v2(opts, sample=opts.ref_frame_num, size=(opts.image_w,opts.image_h), split='valid', name=opts.dataset_name, root=opts.dataset_root)
 
     else:  # TODO
         train_dataset = ContinuousEdgeLineDatasetMaskFinetune(opts.data_path, mask_path=opts.mask_path, is_train=True,
@@ -53,7 +72,7 @@ def main_worker(rank, opts):
                                                              line_path=opts.val_line_path)
 
     # iterations_per_epoch = len(train_dataset.image_id_list) // opts.batch_size
-    iterations_per_epoch = len(train_dataset.video_names) // opts.batch_size   # video
+    iterations_per_epoch = len(train_dataset) // opts.batch_size   # video
     train_epochs = opts.train_epoch
     train_config = TrainerConfig(max_epochs=train_epochs, batch_size=opts.batch_size,
                                  learning_rate=opts.lr, betas=(0.9, 0.95),
@@ -67,12 +86,14 @@ def main_worker(rank, opts):
     if not opts.MaP:
         # trainer = TrainerForContinuousEdgeLine(IGPT_model, train_dataset, test_dataset, train_config, gpu, rank,
         #                                        iterations_per_epoch, logger=logger)
-        if not opts.exp:
+        if opts.exp:
+            # trainer = TrainerForContinuousEdgeLine_plus(IGPT_model, train_dataset, test_dataset, train_config, gpu, rank,
+            #                                     iterations_per_epoch, logger=logger)
+            trainer = TrainerForContinuousStruct_video(IGPT_model, train_dataset, test_dataset, train_config, gpu, rank,
+                                                iterations_per_epoch, logger=logger)
+        else:
             trainer = TrainerForContinuousEdgeLine_video(IGPT_model, train_dataset, test_dataset, train_config, gpu, rank,
                                                          iterations_per_epoch, logger=logger)
-        else:
-            trainer = TrainerForContinuousEdgeLine_plus(IGPT_model, train_dataset, test_dataset, train_config, gpu, rank,
-                                                iterations_per_epoch, logger=logger)
     else:  # TODO
         trainer = TrainerForEdgeLineFinetune(IGPT_model, train_dataset, test_dataset, train_config, gpu, rank,
                                              iterations_per_epoch, logger=logger)
@@ -86,7 +107,7 @@ if __name__ == '__main__':
     parser.add_argument('--name', type=str, default='places2_continous_edgeline', help='The name of this exp')
     parser.add_argument('--GPU_ids', type=str, default='0, 1')
     parser.add_argument('--ckpt_path', type=str, default='./ckpt')
-    parser.add_argument('--dataset_root', type=str, default="./dataset", help='Indicate where is the root of training set folder')
+    parser.add_argument('--dataset_root', type=str, default="./datasets", help='Indicate where is the root of training set folder')
     parser.add_argument('--dataset_name', type=str, default="YouTubeVOS", help='Indicate which training set')
     # parser.add_argument('--data_path', type=str, default=None, help='Indicate where is the training set')
     # parser.add_argument('--train_line_path', type=str, default=None, help='Indicate where is the wireframes of training set')
@@ -95,8 +116,8 @@ if __name__ == '__main__':
     #                     help='irregular rate, coco rate, addition rate')  # for video
     # parser.add_argument('--mask_rates', type=list, default=[0.4, 0.8, 1.0],
     #                     help='irregular rate, coco rate, addition rate')
-    parser.add_argument('--batch_size', type=int, default=1)
-    parser.add_argument('--train_epoch', type=int, default=12, help='how many epochs')
+    parser.add_argument('--batch_size', type=int, default=4)
+    parser.add_argument('--train_epoch', type=int, default=100, help='how many epochs')
     parser.add_argument('--print_freq', type=int, default=100, help='While training, the freq of printing log')
     parser.add_argument('--validation_path', type=str, default=None, help='where is the validation set of ImageNet')
     # parser.add_argument('--val_line_path', type=str, default=None, help='Indicate where is the wireframes of val set')
@@ -118,6 +139,7 @@ if __name__ == '__main__':
     parser.add_argument('--gpus', type=int, default=1, help='how many GPUs in one node')
     parser.add_argument('--AMP', action='store_true', help='Automatic Mixed Precision')
     parser.add_argument('--local_rank', type=int, default=-1, help='the id of this machine')
+    parser.add_argument('--DDP', action='store_true', help='DDP')
     # for video
     # parser.add_argument('--loss_item', type=str, nargs='+', default=["hole", "valid"], help='the id of this machine')
     parser.add_argument('--loss_hole_valid_weight', type=float, nargs='+', default=[0.8, 0.2], help='the weight for computing the hole/valid part ')
@@ -128,6 +150,7 @@ if __name__ == '__main__':
 
     # experimental model
     parser.add_argument('--exp', action='store_true', help='whether to use the experimental model')
+    parser.add_argument('--cnn', action='store_true', help='whether to use the cnn model')
 
     # show th loss_coice and edge_gaussian and the loss_hole_valid_weight and loss_edge_line_weight
     print("The loss_choice is: ", parser.parse_args().loss_choice)
@@ -141,10 +164,13 @@ if __name__ == '__main__':
     os.makedirs(opts.ckpt_path, exist_ok=True)
     os.environ['CUDA_VISIBLE_DEVICES'] = opts.GPU_ids
 
-    opts.world_size = opts.nodes * opts.gpus
-    os.environ['MASTER_ADDR'] = 'localhost'
-    os.environ['MASTER_PORT'] = '12380'
-    rank = 0
+    if opts.DDP:
+        opts.world_size = opts.nodes * opts.gpus
+        os.environ['MASTER_ADDR'] = 'localhost'
+        os.environ['MASTER_PORT'] = '12380'
+    else:
+        opts.world_size = 1
+    # rank = 0
     # torch.cuda.set_device(rank)
     logging.basicConfig(
         format="%(asctime)s - %(levelname)s - %(name)s -   %(message)s",
@@ -152,4 +178,5 @@ if __name__ == '__main__':
         level=logging.INFO,
     )
 
-    main_worker(rank, opts)
+    # main_worker(rank, opts, is_distributed)
+    mp.spawn(main_worker, nprocs=opts.world_size, args=(opts,))

@@ -75,8 +75,9 @@ def stitch_images(inputs, *outputs, img_per_row=2):
 
     # width, height = inputs[0][:, :, 0].shape
     height, width = inputs[0][:, :, 0].shape
-    img = Image.new('RGB',
-                    (width * img_per_row * columns + gap * (img_per_row - 1), height * int(len(inputs) / img_per_row)))
+    img_w = width * img_per_row * columns + gap * (img_per_row - 1)
+    img_h = height * int(len(inputs) / img_per_row)
+    img = Image.new('RGB', (img_w, img_h), (255, 0, 0))
     images = [inputs, *outputs]
 
     for ix in range(len(inputs)):
@@ -338,22 +339,26 @@ def SampleEdgeLineLogits_video(model, context, masks=None, iterations=1, device=
             edges_logits, lines_logits = model.forward_with_logits(frames, edges, lines, masks=masks)
             
             # print(edges_logits.shape)
-            edges_logits = edges_logits.view(batch_size*timesteps, *edges_logits.shape[2:])
+            edges_logits = edges_logits.contiguous().view(batch_size*timesteps, *edges_logits.shape[2:])
             # print(edges_logits.shape)
             # input()
-            lines_logits = lines_logits.view(batch_size*timesteps, *lines_logits.shape[2:])
+            lines_logits = lines_logits.contiguous().view(batch_size*timesteps, *lines_logits.shape[2:])
             edges = edges.view(batch_size*timesteps, *edges.shape[2:])
             lines = lines.view(batch_size*timesteps, *lines.shape[2:])
             masks = masks.view(batch_size*timesteps, *masks.shape[2:])
             
             edges_pred = torch.sigmoid(edges_logits)
             lines_pred = torch.sigmoid((lines_logits + add_v) * mul_v)
+            
             edges = edges + edges_pred * masks
             # edges = edges * (1 - masks) + edges_pred * masks
+            # edges = edges_pred
             edges[edges >= 0.25] = 1
             edges[edges < 0.25] = 0
+            
             lines = lines + lines_pred * masks
             # lines = lines * (1 - masks) + lines_pred * masks
+            # lines = lines_pred
 
             t, _, h, w = edges_pred.shape
             edges_pred = edges_pred.reshape(t, -1, 1)
@@ -382,20 +387,95 @@ def SampleEdgeLineLogits_video(model, context, masks=None, iterations=1, device=
             lines = lines * (1 - masks)
 
     # save the first edge, line for visualization
-    from torchvision.utils import save_image
-    save_image(edges[0, 0], 'TSR_inference_edge_0.png') # test
-    save_image(lines[0, 0], 'TSR_inference_line_0.png') # test
-    # save second
-    save_image(edges[0, 1], 'TSR_inference_edge_1.png') # test
-    save_image(lines[0, 1], 'TSR_inference_line_1.png') # test
+    # from torchvision.utils import save_image
+    # save_image(edges[0, 0], 'TSR_inference_edge_0.png') # test
+    # save_image(lines[0, 0], 'TSR_inference_line_0.png') # test
+    # # save second
+    # save_image(edges[0, 1], 'TSR_inference_edge_1.png') # test
+    # save_image(lines[0, 1], 'TSR_inference_line_1.png') # test
 
-    save_image(edges[0, 2], 'TSR_inference_edge_2.png') # test
-    save_image(lines[0, 2], 'TSR_inference_line_2.png') # test
+    # save_image(edges[0, 2], 'TSR_inference_edge_2.png') # test
+    # save_image(lines[0, 2], 'TSR_inference_line_2.png') # test
 
-    save_image(edges[0, 3], 'TSR_inference_edge_3.png') # test
-    save_image(lines[0, 3], 'TSR_inference_line_3.png') # test
+    # save_image(edges[0, 3], 'TSR_inference_edge_3.png') # test
+    # save_image(lines[0, 3], 'TSR_inference_line_3.png') # test
 
     return edges, lines
+
+
+def SampleStructLogits_video(model, context, masks=None, iterations=1, device='cuda', add_v=0, mul_v=4):
+    [frames, structs] = context
+    frames = frames.to(device)
+    structs = structs.to(device)
+    masks = masks.to(device)
+    frames = frames * (1 - masks)
+    structs = structs * (1 - masks)
+
+    # Now we assume that the first dimension of img, edge, line, and mask is the batch size
+    # and the second dimension is the time dimension.
+    # So we need to iterate over these dimensions.
+    batch_size, timesteps, _, h, w = frames.shape
+
+    model.eval()
+    with torch.no_grad():
+        for i in range(iterations):
+            structs_logits = model.forward_with_logits(frames, structs, masks=masks)
+            
+            # print(edges_logits.shape)
+            structs_logits = structs_logits.view(batch_size*timesteps, *structs_logits.shape[2:])
+            # print(edges_logits.shape)
+            # input()
+            structs = structs.view(batch_size*timesteps, *structs.shape[2:])
+            masks = masks.view(batch_size*timesteps, *masks.shape[2:])
+            
+            # sigmoid activation
+            # structs_pred = torch.sigmoid(structs_logits)
+            # # lines_pred = torch.sigmoid((lines_logits + add_v) * mul_v)
+            # structs = structs + structs_pred * masks
+            # # edges = edges + edges_pred * masks
+            # # edges[edges >= 0.25] = 1
+            # # edges[edges < 0.25] = 0
+            # # lines = lines + lines_pred * masks
+
+            # tanh activation
+            structs_pred = (structs_logits + 1) / 2
+            structs = structs + structs_pred * masks
+
+            t, _, h, w = structs_pred.shape
+            structs_pred = structs_pred.reshape(t, -1, 1)
+            masks = masks.reshape(t, -1)
+
+            structs_probs = torch.cat([1 - structs_pred, structs_pred], dim=-1)
+            structs_probs[:, :, 1] += 0.5
+            structs_max_probs = structs_probs.max(dim=-1)[0] + (1 - masks) * (-100)
+
+            indices = torch.sort(structs_max_probs, dim=-1, descending=True)[1]
+
+            for ii in range(t):
+                keep = int((i + 1) / iterations * torch.sum(masks[ii, ...]))
+
+                assert torch.sum(masks[ii][indices[ii, :keep]]) == keep, "Error!!!"
+                masks[ii][indices[ii, :keep]] = 0
+
+            masks = masks.view(batch_size, timesteps, 1, h, w)
+            structs = structs.view(batch_size, timesteps, 1, h, w)
+            structs = structs * (1 - masks)
+
+    # save the first edge, line for visualization
+    # from torchvision.utils import save_image
+    # save_image(edges[0, 0], 'TSR_inference_edge_0.png') # test
+    # save_image(lines[0, 0], 'TSR_inference_line_0.png') # test
+    # # save second
+    # save_image(edges[0, 1], 'TSR_inference_edge_1.png') # test
+    # save_image(lines[0, 1], 'TSR_inference_line_1.png') # test
+
+    # save_image(edges[0, 2], 'TSR_inference_edge_2.png') # test
+    # save_image(lines[0, 2], 'TSR_inference_line_2.png') # test
+
+    # save_image(edges[0, 3], 'TSR_inference_edge_3.png') # test
+    # save_image(lines[0, 3], 'TSR_inference_line_3.png') # test
+
+    return structs
 
 
 
@@ -482,7 +562,7 @@ def get_frame_mask_edge_line_list(args):
         #     edge_dir = os.path.join(data_root, "test_all_frames", "edges_old")
         # else :
         #     edge_dir = os.path.join(data_root, "test_all_frames", "edges")
-        edge_dir = os.path.join(data_root, "test_all_frames", "edges")
+        # edge_dir = os.path.join(data_root, "test_all_frames", "edges")
         line_dir = os.path.join(data_root, "test_all_frames", "wireframes")
     elif args.input == 'test':
         data_root = "./datasets/YouTubeVOS_small/"
@@ -513,13 +593,14 @@ def get_frame_mask_edge_line_list(args):
     mask_list = [os.path.join(mask_dir, name) for name in mask_folder]
     frame_folder = sorted(os.listdir(frame_dir))
     frame_list = [os.path.join(frame_dir, name) for name in frame_folder]
-    edge_folder = sorted(os.listdir(edge_dir))
-    edge_list = [os.path.join(edge_dir, name) for name in edge_folder]
+    # edge_folder = sorted(os.listdir(edge_dir))
+    # edge_list = [os.path.join(edge_dir, name) for name in edge_folder]
     line_folder = sorted(os.listdir(line_dir))
     line_list = [os.path.join(line_dir, name) for name in line_folder]    
 
     # print("[Finish building dataset {}]".format(args.input))
-    return frame_list, mask_list, edge_list, line_list
+    # return frame_list, mask_list, edge_list, line_list
+    return frame_list, mask_list, line_list
 
 # sample reference frames from the whole video 
 def get_ref_index(f, neighbor_ids, length, ref_length=5, num_ref=-1):
@@ -593,6 +674,86 @@ def read_edge_line_PIL(edge_path, line_path, w, h):
     line_list[-1].save('test_inference_line.png') # test
 
     return edge_list, line_list
+
+from skimage.feature import canny
+class TestDataset(torch.utils.data.Dataset):
+    def __init__(self, args):
+        # self.img_size = args.input_size
+        self.img_h, self.img_w = args.input_size
+        if args.input == 'davis':
+            self.data_root = "./datasets/DAVIS"
+            frame_dir = os.path.join(self.data_root, "JPEGImages", "JPEGImages_432_240")
+            line_dir = os.path.join(self.data_root, "JPEGImages", "wireframes")
+            mask_dir = os.path.join(self.data_root, "JPEGImages", "test_masks")
+        elif args.input == 'youtubevos':
+            self.data_root = "./datasets/YouTubeVOS"
+            frame_dir = os.path.join(self.data_root, "test_all_frames", "JPEGImages_432_240")
+            # gray_dir = os.path.join(self.data_root, "test_all_frames", "gray")
+            # edge_dir = os.path.join(data_root, "test_all_frames", "edges")
+            line_dir = os.path.join(self.data_root, "test_all_frames", "wireframes")
+            mask_dir = os.path.join(self.data_root, "test_all_frames", "test_masks") #mask_random
+        self.frame_list = [os.path.join(frame_dir, name) for name in sorted(os.listdir(frame_dir))]
+        # self.gray_list = [os.path.join(gray_dir, name) for name in sorted(os.listdir(gray_dir))]
+        # self.edge_list = [os.path.join(edge_dir, name) for name in sorted(os.listdir(edge_dir))]
+        self.line_list = [os.path.join(line_dir, name) for name in sorted(os.listdir(line_dir))]
+        self.mask_list = [os.path.join(mask_dir, name) for name in sorted(os.listdir(mask_dir))]
+        self.mask_idx_diff = 0
+    
+    def __len__(self):
+        return len(self.frame_list)
+    
+    def get_name(self, idx):
+        return self.frame_list[idx].split('/')[-1]
+    
+    def __getitem__(self, idx):
+        if(idx-self.mask_idx_diff >= len(self.mask_list) or 
+           self.frame_list[idx].split('/')[-1] != self.mask_list[idx-self.mask_idx_diff].split('/')[-1]):
+            self.mask_idx_diff += 1
+            return [], None, None, None, None, None
+        
+        lst = sorted(os.listdir(self.frame_list[idx]))
+        fr_lst = []
+        idx_lst = []
+        for name in lst:
+            fr_lst.append(os.path.join(self.frame_list[idx], name))
+            idx_lst.append(name)
+        frames = []
+        grays = []
+        edges = []
+        for fr in fr_lst:
+            img = Image.open(fr)
+            # img = Image.open(fr).resize((self.img_w, self.img_h), Image.BICUBIC)
+            frames.append(img)
+
+            gray = img.convert('L')
+            grays.append(gray)
+
+            edge = canny(np.array(gray), sigma=2).astype(np.uint8)*255
+            edges.append(Image.fromarray(edge))
+        
+        # lst = sorted(os.listdir(self.gray_list[idx]))
+        # grays = []
+        # for name in lst:
+        #     gray = Image.open(os.path.join(self.gray_list[idx], name)).convert('L').resize((self.img_w, self.img_h))
+        #     grays.append(gray)
+        
+        lst = sorted(os.listdir(self.line_list[idx]))
+        lines = []
+        for name in lst:
+            lines.append(Image.open(os.path.join(self.line_list[idx], name)).resize((self.img_w, self.img_h)))
+        
+        lst = sorted(os.listdir(self.mask_list[idx-self.mask_idx_diff]))
+        masks = []
+        for name in lst:
+            m = Image.open(os.path.join(self.mask_list[idx-self.mask_idx_diff], name))
+            m = m.resize((self.img_w, self.img_h), Image.BILINEAR)
+            m = np.array(m.convert('L'))
+            m = np.array(m > 127).astype(np.uint8)
+            m = cv2.dilate(m, cv2.getStructuringElement(cv2.MORPH_CROSS, (3, 3)), iterations=4)
+            masks.append(Image.fromarray(m*255))
+
+        return idx_lst, frames, grays, edges, lines, masks
+
 
 def create_square_masks(video_length, h, w):
     masks = []
@@ -668,7 +829,7 @@ def load_masked_position_encoding(mask, input_size, pos_num, str_size):
 # FuseFormer
 # ##########################################
 
-def create_random_shape_with_random_motion(video_length, imageHeight=240, imageWidth=432):
+def create_random_shape_with_random_motion(video_length, imageHeight=240, imageWidth=432, move_prob=1.01):
     # get a random shape
     height = random.randint(imageHeight//3, imageHeight-1)
     width = random.randint(imageWidth//3, imageWidth-1)
@@ -685,7 +846,7 @@ def create_random_shape_with_random_motion(video_length, imageHeight=240, imageW
     m.paste(region, (y, x, y+region.size[0], x+region.size[1]))
     masks = [m.convert('L')]
     # return fixed masks
-    if random.uniform(0, 1) > 0.5:
+    if random.uniform(0, 1) < move_prob:
         return masks*video_length
     # return moving masks
     for _ in range(video_length-1):

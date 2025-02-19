@@ -2,6 +2,7 @@ import numpy as np
 
 from .ffc import *
 from .layers import *
+from .fuseformer import *
 
 
 class ResnetBlock_remove_IN(nn.Module):
@@ -25,6 +26,69 @@ class ResnetBlock_remove_IN(nn.Module):
 
         return output
 
+class ResnetBlock_TR(nn.Module):
+    def __init__(self, input_dim, out_dim=None):
+        super(ResnetBlock_TR, self).__init__()
+
+        if out_dim is None:
+            out_dim = input_dim
+
+        self.conv1 = nn.Conv2d(input_dim, input_dim, kernel_size=3, stride=1, padding="same")
+        self.bn1 = nn.BatchNorm2d(input_dim)
+        self.act = nn.ReLU(True)
+        self.conv2 = nn.Conv2d(input_dim, out_dim, kernel_size=3, stride=1, padding="same")
+        self.bn2 = nn.BatchNorm2d(out_dim)
+
+
+    def forward(self, x):
+        out = x
+        out = self.conv1(out)
+        out = self.bn1(out)
+        out = self.act(out)
+        out = self.conv2(out)
+        out = self.bn2(out)
+        out = x + out
+        out = self.act(out)
+        return out
+    
+class ViTBlock(nn.Module):
+    def __init__(self, dim, num_heads, mlp_ratio=4.0, dropout=0.1):
+        super(ViTBlock, self).__init__()
+        self.num_heads = num_heads
+        self.dim = dim
+        self.mlp_ratio = mlp_ratio
+
+        # Layer normalization
+        self.norm1 = nn.LayerNorm(dim)
+        self.norm2 = nn.LayerNorm(dim)
+        
+        # Multi-head self-attention
+        self.attn = nn.MultiheadAttention(embed_dim=dim, num_heads=num_heads, dropout=dropout)
+
+        # MLP (feed-forward network)
+        hidden_dim = int(dim * mlp_ratio)
+        self.mlp = nn.Sequential(
+            nn.Linear(dim, hidden_dim),
+            nn.GELU(),
+            nn.Linear(hidden_dim, dim),
+            nn.Dropout(dropout)
+        )
+
+        self.dropout = nn.Dropout(dropout)
+
+    def forward(self, x):
+        b, c, h, w = x.shape
+        x = x.flatten(2).transpose(1, 2)  # Shape: (b, h*w, c)
+
+        # Self-attention
+        x = x + self.dropout(self.attn(self.norm1(x), self.norm1(x), self.norm1(x))[0])
+
+        # MLP
+        x = x + self.dropout(self.mlp(self.norm2(x)))
+
+        # Reshape back to (b, c, h, w)
+        x = x.transpose(1, 2).view(b, c, h, w)
+        return x
 
 class MaskedSinusoidalPositionalEmbedding(nn.Embedding):
     """This module produces sinusoidal positional embeddings of any length."""
@@ -180,14 +244,20 @@ class LaMa_model_video_2D(nn.Module):
         self.conv4 = nn.Conv2d(in_channels=self.channel3, out_channels=self.channel4, kernel_size=3, stride=2, padding=1)
         self.bn4 = nn.BatchNorm2d(self.channel4)
 
-        blocks = []
-        ### resnet blocks
-        for i in range(9):
-            # cur_resblock = ResnetBlock_remove_IN(512, 1)
-            cur_resblock = ResnetBlock_remove_IN(self.channel4, 1)
-            blocks.append(cur_resblock)
+        if config.transformer:
+            self.middle = ViTBlock(self.channel4, 8)
+        else:
+            blocks = []
+            ### resnet blocks
+            for i in range(9):
+                # cur_resblock = ResnetBlock_remove_IN(512, 1)
+                if config.conv_resnet:
+                    cur_resblock = ResnetBlock_TR(self.channel4)
+                else:
+                    cur_resblock = ResnetBlock_remove_IN(self.channel4, 1)
+                blocks.append(cur_resblock)
 
-        self.middle = nn.Sequential(*blocks)
+            self.middle = nn.Sequential(*blocks)
 
         # self.convt1 = nn.ConvTranspose2d(512, 256, kernel_size=3, stride=2, padding=1, output_padding=1)
         # self.bnt1 = nn.BatchNorm2d(256)

@@ -7,8 +7,8 @@ import numpy as np
 import torch
 from tqdm import tqdm
 
-from datasets.dataset_TSR import ContinuousEdgeLineDatasetMask_video
-from src.models.TSR_model import EdgeLineGPTConfig, EdgeLineGPT256RelBCE_video
+from datasets.dataset_TSR import ContinuousEdgeLineDatasetMask_video, EdgeLineDataset_v2
+from src.models.TSR_model import EdgeLineGPTConfig, EdgeLineGPT256RelBCE_video, StructGPT256RelBCE_video, EdgeLine_CNN
 from src.utils import set_seed, SampleEdgeLineLogits_video, SampleEdgeLineLogits
 
 if __name__ == '__main__':
@@ -28,6 +28,8 @@ if __name__ == '__main__':
     parser.add_argument('--edge_gaussian', type=int, default=0, help='the sigma of gaussian kernel for edge')
     parser.add_argument("--model", type=str, default='fuseformer')
     # parser.add_argument("-v", "--video", type=str, required=True)
+    parser.add_argument("--exp", action="store_true", help="use the exp version of the model")
+    parser.add_argument('--cnn', action="store_true", help="use the cnn version of the model")
 
     opts = parser.parse_args()
 
@@ -36,17 +38,25 @@ if __name__ == '__main__':
     s_time = time.time()
     model_config = EdgeLineGPTConfig(embd_pdrop=0.0, resid_pdrop=0.0, n_embd=opts.n_embd, block_size=32,
                                      attn_pdrop=0.0, n_layer=opts.n_layer, n_head=opts.n_head, ref_frame_num=opts.ref_frame_num)
-    IGPT_model = EdgeLineGPT256RelBCE_video(model_config, opts, device=device)
+    if opts.exp:
+        IGPT_model = StructGPT256RelBCE_video(model_config, opts, device=device)
+    elif opts.cnn:
+        IGPT_model = EdgeLine_CNN()
+    else:
+        IGPT_model = EdgeLineGPT256RelBCE_video(model_config, opts, device=device)
     checkpoint = torch.load(opts.ckpt_path)
     IGPT_model.load_state_dict(checkpoint if opts.ckpt_path.endswith('.pt') else checkpoint['model'])
-    IGPT_model.to("cuda")
+    IGPT_model.to(device)
 
-    test_dataset = ContinuousEdgeLineDatasetMask_video(opts, sample=opts.ref_frame_num, size=(432, 240), split='test', name=opts.dataset_name, root=opts.dataset_root)
+    # test_dataset = ContinuousEdgeLineDatasetMask_video(opts, sample=opts.ref_frame_num, size=(432, 240), split='test', name=opts.dataset_name, root=opts.dataset_root)
+    test_dataset = EdgeLineDataset_v2(opts, sample=opts.ref_frame_num, size=(432, 240), split='test', name=opts.dataset_name, root=opts.dataset_root)
     
 
     for it in tqdm(range(test_dataset.__len__())):
 
         items = test_dataset.__getitem__(it)
+        if not items:
+            continue
         edge_folder = os.path.join(opts.save_url, "edges", items['name'])
         line_folder = os.path.join(opts.save_url, "lines", items['name'])
         concat_folder = os.path.join(opts.save_url, "concat", items['name'])
@@ -55,7 +65,7 @@ if __name__ == '__main__':
         
         edge_pred, line_pred = SampleEdgeLineLogits_video(IGPT_model, context=[items['frames'].unsqueeze(0),
                                                 items['edges'].unsqueeze(0), items['lines'].unsqueeze(0)],
-                            masks=items['masks'].unsqueeze(0), iterations=opts.iterations)
+                            masks=items['masks'].unsqueeze(0), iterations=opts.iterations, device=device)
 
         # denormalize the result of edge_pred and line_pred with the above min-max normalization
         # edge_pred = edge_pred * (edge_pred.max() - edge_pred.min()) + edge_pred.min()
@@ -73,28 +83,32 @@ if __name__ == '__main__':
 
             cv2.imwrite(os.path.join(edge_folder, ref_idx), edge_output[:, :, ::-1])
             cv2.imwrite(os.path.join(line_folder, ref_idx), line_output[:, :, ::-1])
-            
+
             # combine the result in one figure for better visualization
             # Get the original RGB image
             masked_image = items['frames'][i] * (1-items['masks'][i])
-            masked_image = ((masked_image + 1) * 0.5).permute(1, 2, 0)
+            masked_image = ((masked_image)).permute(1, 2, 0)
             masked_image = (masked_image * 255).detach().numpy().astype(np.uint8)
-            original_image = ((items['frames'][i] + 1) * 0.5).permute(1, 2, 0)
+            original_image = ((items['frames'][i])).permute(1, 2, 0)
             original_image = (original_image * 255).detach().numpy().astype(np.uint8)
             
             # Get the original image and invert the masked area
             original_edge = items['edges'][i]*(1-items['masks'][i]) + items['masks'][i]*(1-items['edges'][i])
             original_line = items['lines'][i]*(1-items['masks'][i]) + items['masks'][i]*(1-items['lines'][i])
-            original_edge = original_edge.repeat(3, 1, 1).permute(1, 2, 0)
-            original_line = original_line.repeat(3, 1, 1).permute(1, 2, 0)
+            # original_edge = original_edge.repeat(3, 1, 1).permute(1, 2, 0)
+            # original_line = original_line.repeat(3, 1, 1).permute(1, 2, 0)
+            original_edge = original_edge.permute(1, 2, 0)
+            original_line = original_line.permute(1, 2, 0)
             original_edge = (original_edge * 255).detach().numpy().astype(np.uint8)
             original_line = (original_line * 255).detach().numpy().astype(np.uint8)
             
             output_edge = (edge_pred[0][i].cpu() * (1-items['masks'][i])) + ((1-edge_pred[0][i].cpu()) * items['masks'][i])
-            output_edge = output_edge.repeat(3, 1, 1).permute(1, 2, 0)
+            # output_edge = output_edge.repeat(3, 1, 1).permute(1, 2, 0)
+            output_edge = output_edge.permute(1, 2, 0)
             output_edge = (output_edge * 255).detach().numpy().astype(np.uint8)
             output_line = (line_pred[0][i].cpu() * (1-items['masks'][i])) + ((1-line_pred[0][i].cpu()) * items['masks'][i])
-            output_line = output_line.repeat(3, 1, 1).permute(1, 2, 0)
+            # output_line = output_line.repeat(3, 1, 1).permute(1, 2, 0)
+            output_line = output_line.permute(1, 2, 0)
             output_line = (output_line * 255).detach().numpy().astype(np.uint8)
             line_concat = np.concatenate((original_image, original_line, output_line), axis=1)
             edge_concat = np.concatenate((masked_image, original_edge, output_edge), axis=1)
